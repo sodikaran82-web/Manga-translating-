@@ -1,0 +1,65 @@
+import { getDocument, GlobalWorkerOptions, version } from 'pdfjs-dist';
+
+// Use Vite's worker import to ensure the worker is bundled correctly
+import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker';
+GlobalWorkerOptions.workerPort = new PdfWorker();
+
+export async function convertPdfToImages(file: File): Promise<File[]> {
+  const arrayBuffer = await file.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+  const pdf = await getDocument({ 
+    data: uint8Array,
+  }).promise;
+  
+  const numPages = pdf.numPages;
+  const imageFiles: File[] = [];
+
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdf.getPage(i);
+    
+    // Set scale for good quality
+    const scale = 2.0;
+    const viewport = page.getViewport({ scale });
+    
+    // Prepare canvas
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    
+    if (!context) {
+      throw new Error('Could not create canvas context');
+    }
+    
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+    
+    // Render PDF page into canvas context
+    const renderContext = {
+      canvasContext: context,
+      viewport: viewport,
+    };
+    
+    await page.render(renderContext).promise;
+    
+    // Convert canvas to blob
+    const imageFile = await new Promise<File>((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const fileName = numPages > 1 
+            ? file.name.replace(/\.pdf$/i, `_page_${i}.png`)
+            : file.name.replace(/\.pdf$/i, '.png');
+          const imgFile = new File([blob], fileName, {
+            type: 'image/png',
+            lastModified: Date.now(),
+          });
+          resolve(imgFile);
+        } else {
+          reject(new Error('Could not convert canvas to blob'));
+        }
+      }, 'image/png');
+    });
+    
+    imageFiles.push(imageFile);
+  }
+  
+  return imageFiles;
+}
