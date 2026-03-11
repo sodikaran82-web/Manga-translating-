@@ -8,7 +8,7 @@ interface TranslationOverlayProps {
   onDeleteBlock?: (index: number) => void;
 }
 
-function AutoText({ text, isSelected }: { text: string, isSelected: boolean }) {
+function AutoText({ text, originalText, isSelected }: { text: string, originalText: string, isSelected: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLParagraphElement>(null);
   const [fontSize, setFontSize] = useState(14);
@@ -25,18 +25,31 @@ function AutoText({ text, isSelected }: { text: string, isSelected: boolean }) {
     if (!container || !textEl) return;
 
     let min = 6;
-    // Cap maximum font size dynamically based on container height to prevent oversized text
-    // while still allowing larger text in very large bubbles to prevent excessive whitespace.
-    let max = Math.min(36, Math.max(20, Math.floor(container.clientHeight / 3)));
-    let best = 12;
+    
+    // Estimate original font size based on container area and original text length
+    const paddingX = 12; // 6px padding on all sides
+    const paddingY = 12;
+    const availableHeight = container.clientHeight - paddingY;
+    const availableWidth = container.clientWidth - paddingX;
+    
+    const textArea = Math.max(0, availableWidth) * Math.max(0, availableHeight);
+    const originalCharCount = Math.max(1, originalText.replace(/\s/g, '').length);
+    
+    // For CJK characters, area ≈ charCount * (fontSize * 1.2 * fontSize)
+    let estimatedOriginalFontSize = Math.sqrt(textArea / (1.2 * originalCharCount));
+    
+    // Constrain it to reasonable bounds and add a small buffer (1.2x) for estimation errors
+    estimatedOriginalFontSize = Math.max(12, Math.min(estimatedOriginalFontSize * 1.2, container.clientHeight / 1.5));
+    
+    let max = Math.floor(estimatedOriginalFontSize);
+    let best = min;
 
     // Binary search for best font size
     while (min <= max) {
       const mid = Math.floor((min + max) / 2);
       textEl.style.fontSize = `${mid}px`;
       
-      // Allow a tiny bit of overflow tolerance to prevent aggressive shrinking
-      if (textEl.scrollHeight <= container.clientHeight + 2 && textEl.scrollWidth <= container.clientWidth + 2) {
+      if (textEl.scrollHeight <= availableHeight && textEl.scrollWidth <= availableWidth) {
         best = mid;
         min = mid + 1;
       } else {
@@ -46,19 +59,20 @@ function AutoText({ text, isSelected }: { text: string, isSelected: boolean }) {
     
     setFontSize(best);
     textEl.style.fontSize = `${best}px`;
-  }, [text, isSelected]);
+  }, [text, originalText, isSelected]);
 
   return (
-    <div ref={containerRef} className={`w-full h-full flex flex-col ${isSelected ? 'overflow-y-auto max-h-[250px] scrollbar-thin p-2' : 'overflow-hidden p-1.5'}`}>
+    <div ref={containerRef} className={`w-full h-full flex flex-col items-center justify-center ${isSelected ? 'overflow-y-auto max-h-[250px] scrollbar-thin p-2' : 'overflow-hidden p-1.5'}`}>
       <p 
         ref={textRef} 
-        className={`font-comic text-black text-center font-bold my-auto ${isSelected ? 'leading-snug' : 'leading-[1.1]'}`} 
+        className={`font-comic text-black text-center font-bold ${isSelected ? 'leading-snug' : 'leading-[1.1]'}`} 
         style={{ 
           wordBreak: 'break-word',
           overflowWrap: 'anywhere',
           hyphens: 'auto',
           fontSize: `${fontSize}px`,
-          width: '100%'
+          width: '100%',
+          margin: 0
         }}
       >
         {text}
@@ -83,7 +97,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock }: Translat
       <img src={imageUrl} alt="Manga page" className="w-full h-auto block" />
       
       {blocks.map((block, index) => {
-        const expand = 15; // Expand bounding box by 1.5% to cover artifacts
+        const expand = 2; // Expand bounding box by 0.2% to cover artifacts
         const ymin = Math.max(0, block.box_2d[0] - expand);
         const xmin = Math.max(0, block.box_2d[1] - expand);
         const ymax = Math.min(1000, block.box_2d[2] + expand);
@@ -101,8 +115,8 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock }: Translat
             key={`${index}-${windowWidth}`} // Force re-render on resize for AutoText
             className={`absolute transition-all duration-200 ease-in-out cursor-pointer flex flex-col items-center justify-center ${
               isSelected 
-                ? 'bg-white z-50 shadow-2xl rounded-2xl p-3 sm:p-4 border-2 border-indigo-600' 
-                : 'bg-white z-10 rounded-2xl hover:ring-2 hover:ring-indigo-400'
+                ? 'bg-white z-50 shadow-2xl rounded p-3 sm:p-4 border-2 border-indigo-600' 
+                : 'bg-white z-10 rounded hover:ring-2 hover:ring-indigo-400'
             }`}
             style={{ 
               top, 
@@ -112,7 +126,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock }: Translat
               minWidth: isSelected ? width : undefined,
               minHeight: isSelected ? height : undefined,
               maxWidth: isSelected ? '280px' : undefined,
-              boxShadow: isSelected ? undefined : '0 0 12px 8px white',
+              boxShadow: isSelected ? undefined : 'none',
             }}
             onClick={() => setSelectedBlock(isSelected ? null : index)}
           >
@@ -129,7 +143,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock }: Translat
                 <X className="w-4 h-4" />
               </button>
             )}
-            <AutoText text={block.translatedText} isSelected={isSelected} />
+            <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} />
           </div>
         );
       })}

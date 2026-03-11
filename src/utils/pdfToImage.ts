@@ -1,6 +1,7 @@
 import { getDocument, GlobalWorkerOptions, version } from 'pdfjs-dist';
 
 // Use Vite's worker import to ensure the worker is bundled correctly
+// @ts-ignore
 import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker';
 GlobalWorkerOptions.workerPort = new PdfWorker();
 
@@ -33,7 +34,7 @@ export async function convertPdfToImages(file: File): Promise<File[]> {
     canvas.width = viewport.width;
     
     // Render PDF page into canvas context
-    const renderContext = {
+    const renderContext: any = {
       canvasContext: context,
       viewport: viewport,
     };

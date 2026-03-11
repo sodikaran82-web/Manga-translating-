@@ -13,7 +13,7 @@ export function ImageUploader({ onImagesSelected }: ImageUploaderProps) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+    const files = Array.from(e.target.files || []) as File[];
     if (files.length === 0) return;
 
     setIsConverting(true);

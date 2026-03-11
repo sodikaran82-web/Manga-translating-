@@ -3,15 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ImageUploader } from './components/ImageUploader';
 import { TranslationOverlay } from './components/TranslationOverlay';
 import { HistoryModal } from './components/HistoryModal';
+import { SettingsModal } from './components/SettingsModal';
 import { translateMangaPage, TranslationBlock } from './utils/geminiService';
 import { saveToHistory, HistoryItem } from './utils/historyService';
 import { getTranslationMemory, saveToTranslationMemory, clearTranslationMemory } from './utils/translationMemoryService';
-import { Loader2, RefreshCw, Languages, AlertCircle, ArrowRight, Download, ChevronLeft, ChevronRight, Trash2, Clock, Archive, Play, Database } from 'lucide-react';
+import { compressImage } from './utils/imageCompressor';
+import { Loader2, RefreshCw, Languages, AlertCircle, ArrowRight, Download, ChevronLeft, ChevronRight, Trash2, Clock, Archive, Play, Database, Settings, Square } from 'lucide-react';
 import JSZip from 'jszip';
+import { jsPDF } from 'jspdf';
 
 interface TranslationItem {
   id: string;
@@ -26,7 +29,11 @@ export default function App() {
   const [items, setItems] = useState<TranslationItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+  const [batchMode, setBatchMode] = useState<'sequential' | 'parallel'>('sequential');
+  const [isBatchTranslating, setIsBatchTranslating] = useState(false);
+  const stopBatchRef = useRef(false);
   const [showConfirmClearMemory, setShowConfirmClearMemory] = useState(false);
   
   const [sourceLang, setSourceLang] = useState(() => {
@@ -34,6 +41,12 @@ export default function App() {
   });
   const [targetLang, setTargetLang] = useState(() => {
     return localStorage.getItem('manga_target_lang') || 'Hindi';
+  });
+  const [selectedModel, setSelectedModel] = useState(() => {
+    return localStorage.getItem('manga_selected_model') || 'gemini-3.1-pro-preview';
+  });
+  const [autoDownload, setAutoDownload] = useState(() => {
+    return localStorage.getItem('manga_auto_download') === 'true';
   });
   const [customPrompt, setCustomPrompt] = useState(() => {
     return localStorage.getItem('manga_custom_prompt') || '';
@@ -67,105 +80,125 @@ export default function App() {
     }
   };
 
-  const translateItem = async (index: number) => {
+  const translateItem = async (index: number, currentItem?: TranslationItem): Promise<void> => {
+    const item = currentItem || items[index];
+    if (!item) return;
+
     setItems(prev => {
       const next = [...prev];
-      next[index] = { ...next[index], status: 'translating', error: undefined };
+      if (next[index]) {
+        next[index] = { ...next[index], status: 'translating', error: undefined };
+      }
       return next;
     });
 
-    const item = items[index];
-
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(item.file);
-      reader.onload = async () => {
-        const base64String = reader.result as string;
-        const matches = base64String.match(/^data:(.+);base64,(.+)$/);
-        if (matches && matches.length === 3) {
-          const mimeType = matches[1];
-          const base64Data = matches[2];
-          
-          try {
-            const memory = await getTranslationMemory(sourceLang, targetLang);
-            const memoryDict = Object.fromEntries(
-              Object.entries(memory).map(([k, v]) => [k, v.translatedText])
-            );
+      let base64String = '';
+      if (item.file) {
+        base64String = await compressImage(item.file);
+      } else if (item.imageUrl.startsWith('data:image')) {
+        base64String = item.imageUrl;
+      } else {
+        throw new Error("No image data available.");
+      }
 
-            const result = await translateMangaPage(base64Data, mimeType, sourceLang, targetLang, customPrompt, memoryDict);
-            
-            // Save new translations to memory
-            for (const block of result) {
-              await saveToTranslationMemory(sourceLang, targetLang, block.originalText, block.translatedText);
-            }
+      const matches = base64String.match(/^data:(.+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        const mimeType = matches[1];
+        const base64Data = matches[2];
+        
+        const memory = await getTranslationMemory(sourceLang, targetLang);
+        const memoryDict = Object.fromEntries(
+          Object.entries(memory).map(([k, v]) => [k, v.translatedText])
+        );
 
-            setItems(prev => {
-              const next = [...prev];
-              if (next[index]) {
-                next[index] = { ...next[index], status: 'done', blocks: result };
-              }
-              return next;
-            });
-            
-            // Save to history
-            saveToHistory({
-              id: item.id,
-              timestamp: Date.now(),
-              imageUrl: base64String,
-              sourceLang,
-              targetLang,
-              blocks: result
-            });
-          } catch (err) {
-            console.error(err);
-            setItems(prev => {
-              const next = [...prev];
-              if (next[index]) {
-                next[index] = { ...next[index], status: 'error', error: "An error occurred during translation." };
-              }
-              return next;
-            });
-          }
-        } else {
-          setItems(prev => {
-            const next = [...prev];
-            if (next[index]) {
-              next[index] = { ...next[index], status: 'error', error: "Failed to read image data." };
-            }
-            return next;
-          });
+        const result = await translateMangaPage(base64Data, mimeType, sourceLang, targetLang, customPrompt, memoryDict, selectedModel);
+        
+        // Save new translations to memory
+        for (const block of result) {
+          await saveToTranslationMemory(sourceLang, targetLang, block.originalText, block.translatedText);
         }
-      };
-      reader.onerror = () => {
+
         setItems(prev => {
           const next = [...prev];
           if (next[index]) {
-            next[index] = { ...next[index], status: 'error', error: "Error reading file." };
+            next[index] = { ...next[index], status: 'done', blocks: result };
           }
           return next;
         });
-      };
+        
+        // Save to history
+        saveToHistory({
+          id: item.id,
+          timestamp: Date.now(),
+          imageUrl: base64String,
+          sourceLang,
+          targetLang,
+          blocks: result
+        });
+      } else {
+        throw new Error("Failed to read image data.");
+      }
     } catch (err) {
       console.error(err);
+      const errorMessage = err instanceof Error ? err.message : "An error occurred during translation.";
       setItems(prev => {
         const next = [...prev];
         if (next[index]) {
-          next[index] = { ...next[index], status: 'error', error: "An error occurred during translation." };
+          next[index] = { ...next[index], status: 'error', error: errorMessage };
         }
         return next;
       });
     }
   };
 
-  // Removed sequential processing queue
-  const handleTranslateAll = () => {
-    const pendingIndices = items
-      .map((item, index) => (item.status === 'pending' || item.status === 'error' ? index : -1))
-      .filter(index => index !== -1);
+  const handleTranslateAll = async () => {
+    const pendingItems = items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.status === 'pending' || item.status === 'error');
       
-    pendingIndices.forEach(index => {
-      translateItem(index);
-    });
+    if (pendingItems.length === 0) return;
+
+    setIsBatchTranslating(true);
+    stopBatchRef.current = false;
+
+    if (batchMode === 'sequential') {
+      for (const { item, index } of pendingItems) {
+        if (stopBatchRef.current) break;
+        await translateItem(index, item);
+        // Add a small delay between requests to help avoid rate limits
+        if (!stopBatchRef.current) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+    } else {
+      // Parallel mode with concurrency limit
+      const CONCURRENCY_LIMIT = 4;
+      for (let i = 0; i < pendingItems.length; i += CONCURRENCY_LIMIT) {
+        if (stopBatchRef.current) break;
+        const chunk = pendingItems.slice(i, i + CONCURRENCY_LIMIT);
+        await Promise.all(chunk.map(async ({ item, index }) => {
+          if (stopBatchRef.current) return;
+          await translateItem(index, item);
+        }));
+        // Add a small delay between chunks to help avoid rate limits
+        if (!stopBatchRef.current && i + CONCURRENCY_LIMIT < pendingItems.length) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+    }
+
+    setIsBatchTranslating(false);
+    
+    // Auto-download if enabled and not stopped manually
+    if (!stopBatchRef.current && autoDownload) {
+      handleDownloadAll();
+    }
+  };
+
+  const handleStopBatch = () => {
+    stopBatchRef.current = true;
+    setIsBatchTranslating(false);
   };
 
   const handleReset = () => {
@@ -230,7 +263,7 @@ export default function App() {
     ctx.drawImage(img, 0, 0);
 
     item.blocks.forEach((block) => {
-      const expand = 15;
+      const expand = 2;
       const ymin = Math.max(0, block.box_2d[0] - expand);
       const xmin = Math.max(0, block.box_2d[1] - expand);
       const ymax = Math.min(1000, block.box_2d[2] + expand);
@@ -242,7 +275,7 @@ export default function App() {
       const h = ((ymax - ymin) / 1000) * canvas.height;
 
       // Draw rounded rectangle
-      const radius = 16;
+      const radius = 4;
       ctx.beginPath();
       ctx.moveTo(x + radius, y);
       ctx.lineTo(x + w - radius, y);
@@ -255,28 +288,31 @@ export default function App() {
       ctx.quadraticCurveTo(x, y, x + radius, y);
       ctx.closePath();
       
-      ctx.shadowColor = 'white';
-      ctx.shadowBlur = 15;
       ctx.fillStyle = 'white';
       ctx.fill();
-      ctx.fill(); // Fill twice to ensure solid center against the shadow
-      ctx.shadowColor = 'transparent'; // Reset shadow for text
 
       ctx.fillStyle = 'black';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       
       let lines: string[] = [];
-      let fontSize = Math.max(12, Math.floor(h / 3));
+      const paddingX = Math.min(12, w * 0.1);
+      const paddingY = Math.min(12, h * 0.1);
+      
+      const textArea = Math.max(0, w - paddingX * 2) * Math.max(0, h - paddingY * 2);
+      const originalCharCount = Math.max(1, block.originalText.replace(/\s/g, '').length);
+      let estimatedOriginalFontSize = Math.sqrt(textArea / (1.2 * originalCharCount));
+      estimatedOriginalFontSize = Math.max(12, Math.min(estimatedOriginalFontSize * 1.2, h / 1.5));
+      
+      let fontSize = Math.floor(estimatedOriginalFontSize);
       const minFontSize = 8;
       let lineHeight = 0;
-      const padding = 12;
       
       while (fontSize >= minFontSize) {
         ctx.font = `bold ${fontSize}px "Comic Neue", Kalam, sans-serif`;
         lineHeight = fontSize * 1.1;
         
-        const words = block.translatedText.split(/\s+/);
+        const words = block.translatedText.trim().split(/\s+/);
         let line = '';
         lines = [];
         
@@ -284,14 +320,14 @@ export default function App() {
           const testLine = line + (line ? ' ' : '') + words[n];
           const metrics = ctx.measureText(testLine);
           
-          if (metrics.width > w - padding * 2 && n > 0) {
+          if (metrics.width > w - paddingX * 2 && n > 0) {
             lines.push(line);
             line = words[n];
           } else {
             line = testLine;
           }
         }
-        lines.push(line);
+        if (line) lines.push(line);
         
         const totalHeight = lines.length * lineHeight;
         
@@ -300,7 +336,7 @@ export default function App() {
             maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
         });
 
-        if ((totalHeight <= h - padding * 2 && maxLineWidth <= w - padding * 2) || fontSize === minFontSize) {
+        if ((totalHeight <= h - paddingY * 2 && maxLineWidth <= w - paddingX * 2) || fontSize === minFontSize) {
           break;
         }
         
@@ -338,11 +374,17 @@ export default function App() {
     const canvas = await generateTranslatedCanvas(currentItem);
     if (!canvas) return;
 
-    const dataUrl = canvas.toDataURL('image/png');
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = `translated_manga_${currentIndex + 1}.png`;
-    a.click();
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+    
+    // Create PDF
+    const pdf = new jsPDF({
+      orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+      unit: 'px',
+      format: [canvas.width, canvas.height]
+    });
+    
+    pdf.addImage(dataUrl, 'JPEG', 0, 0, canvas.width, canvas.height);
+    pdf.save(`translated_manga_${currentIndex + 1}.pdf`);
   };
 
   const handleDownloadAll = async () => {
@@ -351,29 +393,32 @@ export default function App() {
 
     setIsDownloadingAll(true);
     try {
-      const zip = new JSZip();
+      // Create a single PDF with all pages
+      let pdf: jsPDF | null = null;
 
       for (let i = 0; i < doneItems.length; i++) {
         const item = doneItems[i];
         const canvas = await generateTranslatedCanvas(item);
         if (!canvas) continue;
 
-        const blob = await new Promise<Blob | null>((resolve) => {
-          canvas.toBlob(resolve, 'image/png');
-        });
-
-        if (blob) {
-          const originalIndex = items.findIndex(it => it.id === item.id);
-          zip.file(`translated_manga_${originalIndex + 1}.png`, blob);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        
+        if (!pdf) {
+          pdf = new jsPDF({
+            orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+            unit: 'px',
+            format: [canvas.width, canvas.height]
+          });
+          pdf.addImage(dataUrl, 'JPEG', 0, 0, canvas.width, canvas.height);
+        } else {
+          pdf.addPage([canvas.width, canvas.height], canvas.width > canvas.height ? 'landscape' : 'portrait');
+          pdf.addImage(dataUrl, 'JPEG', 0, 0, canvas.width, canvas.height);
         }
       }
 
-      const zipBlob = await zip.generateAsync({ type: 'blob' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(zipBlob);
-      a.download = 'translated_manga_pages.zip';
-      a.click();
-      URL.revokeObjectURL(a.href);
+      if (pdf) {
+        pdf.save('translated_manga_pages.pdf');
+      }
     } catch (error) {
       console.error("Failed to download all:", error);
     } finally {
@@ -420,7 +465,7 @@ export default function App() {
                 disabled={isDownloadingAll}
                 className="p-2 sm:p-3 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-w-[44px] min-h-[44px] flex items-center justify-center"
                 aria-label="Download All"
-                title="Download All Translated Pages (ZIP)"
+                title="Download All Translated Pages (PDF)"
               >
                 {isDownloadingAll ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
@@ -455,6 +500,14 @@ export default function App() {
                 <RefreshCw className="w-5 h-5" />
               </button>
             )}
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 sm:p-3 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+              aria-label="Settings"
+              title="Settings & API Key"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </header>
@@ -463,6 +516,21 @@ export default function App() {
         isOpen={isHistoryOpen} 
         onClose={() => setIsHistoryOpen(false)} 
         onSelectHistoryItem={handleSelectHistoryItem} 
+      />
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        selectedModel={selectedModel}
+        onModelChange={(model) => {
+          setSelectedModel(model);
+          localStorage.setItem('manga_selected_model', model);
+        }}
+        autoDownload={autoDownload}
+        onAutoDownloadChange={(val) => {
+          setAutoDownload(val);
+          localStorage.setItem('manga_auto_download', String(val));
+        }}
       />
 
       {showConfirmClearMemory && (
@@ -562,14 +630,37 @@ export default function App() {
 
               <div className="flex items-center space-x-2">
                 {items.some(item => item.status === 'pending' || item.status === 'error') && (
-                  <button
-                    onClick={handleTranslateAll}
-                    className="flex items-center space-x-1 px-4 py-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded-full text-sm font-medium transition-colors min-h-[44px]"
-                    title="Translate all pending pages at once"
-                  >
-                    <Play className="w-4 h-4" />
-                    <span className="hidden sm:inline">Translate All</span>
-                  </button>
+                  <div className="flex items-center space-x-2 mr-2">
+                    <select
+                      value={batchMode}
+                      onChange={(e) => setBatchMode(e.target.value as 'sequential' | 'parallel')}
+                      className="text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 py-2 pl-3 pr-8"
+                      title="Batch Mode"
+                      disabled={isBatchTranslating}
+                    >
+                      <option value="sequential">Sequential</option>
+                      <option value="parallel">Parallel</option>
+                    </select>
+                    {isBatchTranslating ? (
+                      <button
+                        onClick={handleStopBatch}
+                        className="flex items-center space-x-1 px-4 py-2 bg-red-100 text-red-700 hover:bg-red-200 rounded-full text-sm font-medium transition-colors min-h-[44px]"
+                        title="Stop batch translation"
+                      >
+                        <Square className="w-4 h-4 fill-current" />
+                        <span className="hidden sm:inline">Stop</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleTranslateAll}
+                        className="flex items-center space-x-1 px-4 py-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded-full text-sm font-medium transition-colors min-h-[44px]"
+                        title="Translate all pending pages"
+                      >
+                        <Play className="w-4 h-4" />
+                        <span className="hidden sm:inline">Translate All</span>
+                      </button>
+                    )}
+                  </div>
                 )}
                 <button
                   onClick={() => setCurrentIndex(prev => Math.min(items.length - 1, prev + 1))}
@@ -653,14 +744,29 @@ export default function App() {
                   <div className="w-full space-y-8">
                     <TranslationOverlay imageUrl={currentItem.imageUrl} blocks={currentItem.blocks} onDeleteBlock={handleDeleteBlock} />
                     
-                    <div className="flex justify-center">
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                       <button
                         onClick={handleDownload}
                         className="flex items-center justify-center space-x-2 w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full font-medium shadow-lg shadow-indigo-200 transition-all active:scale-95"
                       >
                         <Download className="w-5 h-5" />
-                        <span>Download Image</span>
+                        <span>Download PDF</span>
                       </button>
+                      
+                      {items.filter(item => item.status === 'done').length > 1 && (
+                        <button
+                          onClick={handleDownloadAll}
+                          disabled={isDownloadingAll}
+                          className="flex items-center justify-center space-x-2 w-full sm:w-auto px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full font-medium shadow-lg shadow-emerald-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+                        >
+                          {isDownloadingAll ? (
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                          ) : (
+                            <Archive className="w-5 h-5" />
+                          )}
+                          <span>Download All (PDF)</span>
+                        </button>
+                      )}
                     </div>
                     
                     {currentItem.blocks.length > 0 ? (
