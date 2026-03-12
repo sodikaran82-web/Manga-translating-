@@ -70,8 +70,8 @@ Do not skip any text. Be exhaustive.`;
 
   const ai = getAiInstance();
 
-  let retries = 3;
-  let delay = 2000;
+  let retries = 5;
+  let delay = 3000;
 
   while (retries > 0) {
     try {
@@ -118,13 +118,20 @@ Do not skip any text. Be exhaustive.`;
       console.error("Gemini API Error:", e);
       const errorMessage = e.message || String(e);
       
-      // Check if it's a rate limit or quota error
-      if (errorMessage.toLowerCase().includes("quota") || errorMessage.toLowerCase().includes("429") || errorMessage.toLowerCase().includes("too many requests")) {
+      // Check if it's a rate limit, quota error, or 503 service unavailable
+      if (
+        errorMessage.toLowerCase().includes("quota") || 
+        errorMessage.toLowerCase().includes("429") || 
+        errorMessage.toLowerCase().includes("too many requests") ||
+        errorMessage.toLowerCase().includes("503") ||
+        errorMessage.toLowerCase().includes("unavailable") ||
+        errorMessage.toLowerCase().includes("high demand")
+      ) {
         retries--;
         if (retries === 0) {
-          throw new Error("API quota exceeded or rate limit reached. Please wait a moment and try again, or add your own API key in Settings.");
+          throw new Error("API is currently overloaded or rate limit reached. Please wait a moment and try again, or add your own API key in Settings.");
         }
-        console.log(`Rate limit hit. Retrying in ${delay}ms... (${retries} retries left)`);
+        console.log(`API overloaded/rate limit hit. Retrying in ${delay}ms... (${retries} retries left)`);
         await new Promise(resolve => setTimeout(resolve, delay));
         delay *= 2; // Exponential backoff
       } else {
