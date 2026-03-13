@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { X, Key, Save, Trash2, Cpu, Download } from 'lucide-react';
-import { getCustomApiKey, setCustomApiKey } from '../utils/geminiService';
+import { getCustomApiKey, setCustomApiKey, getOpenRouterApiKey, setOpenRouterApiKey, getCustomOpenRouterModel, setCustomOpenRouterModel } from '../utils/geminiService';
 
 export const AVAILABLE_MODELS = [
+  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview (Faster, Default)' },
   { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview (Best Quality)' },
-  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview (Faster)' }
+  { id: 'openrouter-custom', name: 'OpenRouter (Custom Model)' }
 ];
 
 interface SettingsModalProps {
@@ -18,6 +19,8 @@ interface SettingsModalProps {
 
 export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, autoDownload, onAutoDownloadChange }: SettingsModalProps) {
   const [apiKey, setApiKey] = useState('');
+  const [openRouterKey, setOpenRouterKey] = useState('');
+  const [customOrModel, setCustomOrModel] = useState('');
   const [localModel, setLocalModel] = useState(selectedModel);
   const [localAutoDownload, setLocalAutoDownload] = useState(autoDownload);
   const [saved, setSaved] = useState(false);
@@ -25,6 +28,8 @@ export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, a
   useEffect(() => {
     if (isOpen) {
       setApiKey(getCustomApiKey() || '');
+      setOpenRouterKey(getOpenRouterApiKey() || '');
+      setCustomOrModel(getCustomOpenRouterModel() || '');
       setLocalModel(selectedModel);
       setLocalAutoDownload(autoDownload);
       setSaved(false);
@@ -34,9 +39,9 @@ export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, a
   if (!isOpen) return null;
 
   const handleSave = () => {
-    if (apiKey.trim() || !apiKey.trim()) {
-      setCustomApiKey(apiKey.trim() || null);
-    }
+    setCustomApiKey(apiKey.trim() || null);
+    setOpenRouterApiKey(openRouterKey.trim() || null);
+    setCustomOpenRouterModel(customOrModel.trim() || null);
     onModelChange(localModel);
     onAutoDownloadChange(localAutoDownload);
     setSaved(true);
@@ -45,7 +50,11 @@ export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, a
 
   const handleClear = () => {
     setApiKey('');
+    setOpenRouterKey('');
+    setCustomOrModel('');
     setCustomApiKey(null);
+    setOpenRouterApiKey(null);
+    setCustomOpenRouterModel(null);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -127,6 +136,42 @@ export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, a
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
               />
             </div>
+
+            {localModel === 'openrouter-custom' && (
+              <div className="pt-4 border-t border-gray-100">
+                <label htmlFor="openRouterKey" className="block text-sm font-medium text-gray-700 mb-1 flex items-center space-x-2">
+                  <Key className="w-4 h-4 text-indigo-500" />
+                  <span>OpenRouter API Key</span>
+                </label>
+                <p className="text-xs text-gray-500 mb-3">
+                  Required if you select "OpenRouter (Custom Model)".
+                </p>
+                <input
+                  type="password"
+                  id="openRouterKey"
+                  value={openRouterKey}
+                  onChange={(e) => setOpenRouterKey(e.target.value)}
+                  placeholder="sk-or-v1-..."
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors mb-3"
+                />
+                
+                <label htmlFor="customOrModel" className="block text-sm font-medium text-gray-700 mb-1 flex items-center space-x-2">
+                  <Cpu className="w-4 h-4 text-indigo-500" />
+                  <span>OpenRouter Model Name</span>
+                </label>
+                <p className="text-xs text-gray-500 mb-3">
+                  Paste the model name from OpenRouter (e.g., anthropic/claude-3-opus).
+                </p>
+                <input
+                  type="text"
+                  id="customOrModel"
+                  value={customOrModel}
+                  onChange={(e) => setCustomOrModel(e.target.value)}
+                  placeholder="anthropic/claude-3-opus"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between pt-4 border-t border-gray-100">

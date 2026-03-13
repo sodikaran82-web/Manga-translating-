@@ -1,10 +1,12 @@
+/// <reference types="vite/client" />
 import { GoogleGenAI, Type } from "@google/genai";
+import { safeGetItem, safeSetItem, safeRemoveItem } from './storage';
 
 let aiInstance: GoogleGenAI | null = null;
 
 const getAiInstance = (): GoogleGenAI => {
   if (!aiInstance) {
-    const key = localStorage.getItem('custom_gemini_api_key') || process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
+    const key = safeGetItem('custom_gemini_api_key') || process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
     if (!key) {
       throw new Error("API key is missing. Please add your Gemini API key in Settings.");
     }
@@ -15,10 +17,10 @@ const getAiInstance = (): GoogleGenAI => {
 
 export const setCustomApiKey = (key: string | null) => {
   if (key) {
-    localStorage.setItem('custom_gemini_api_key', key);
+    safeSetItem('custom_gemini_api_key', key);
     aiInstance = new GoogleGenAI({ apiKey: key });
   } else {
-    localStorage.removeItem('custom_gemini_api_key');
+    safeRemoveItem('custom_gemini_api_key');
     const defaultKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
     if (defaultKey) {
       aiInstance = new GoogleGenAI({ apiKey: defaultKey });
@@ -29,7 +31,31 @@ export const setCustomApiKey = (key: string | null) => {
 };
 
 export const getCustomApiKey = (): string | null => {
-  return localStorage.getItem('custom_gemini_api_key');
+  return safeGetItem('custom_gemini_api_key');
+};
+
+export const setOpenRouterApiKey = (key: string | null) => {
+  if (key) {
+    safeSetItem('openrouter_api_key', key);
+  } else {
+    safeRemoveItem('openrouter_api_key');
+  }
+};
+
+export const getOpenRouterApiKey = (): string | null => {
+  return safeGetItem('openrouter_api_key');
+};
+
+export const setCustomOpenRouterModel = (model: string | null) => {
+  if (model) {
+    safeSetItem('openrouter_custom_model', model);
+  } else {
+    safeRemoveItem('openrouter_custom_model');
+  }
+};
+
+export const getCustomOpenRouterModel = (): string | null => {
+  return safeGetItem('openrouter_custom_model') || 'anthropic/claude-3-opus';
 };
 
 export interface TranslationBlock {
@@ -45,7 +71,7 @@ export async function translateMangaPage(
   targetLanguage: string,
   customPrompt?: string,
   translationMemory?: Record<string, string>,
-  modelName: string = "gemini-3.1-pro-preview"
+  modelName: string = "gemini-3-flash-preview"
 ): Promise<TranslationBlock[]> {
   const defaultPrompt = `Analyze this manga/comic page carefully. You must find and extract EVERY SINGLE piece of text on the page. This includes:
 1. All main dialogue in speech bubbles.
@@ -68,13 +94,65 @@ Do not skip any text. Be exhaustive.`;
     finalPrompt += `\n\nTranslation Memory (Use these previously translated segments for consistency if you encounter the same or similar text):\n${memoryString}`;
   }
 
-  const ai = getAiInstance();
-
   let retries = 5;
   let delay = 3000;
 
   while (retries > 0) {
     try {
+      if (modelName === 'openrouter-custom') {
+        const orKey = getOpenRouterApiKey();
+        if (!orKey) {
+          throw new Error("OpenRouter API key is missing. Please add it in Settings.");
+        }
+        const orModel = getCustomOpenRouterModel() || 'anthropic/claude-3-opus';
+        
+        const orPrompt = `${finalPrompt}\n\nIMPORTANT: You must return ONLY a valid JSON array of objects. Do not include markdown formatting like \`\`\`json. Just the raw JSON array. Each object must have: box_2d (array of 4 integers 0-1000), originalText (string), translatedText (string).`;
+        
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${orKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": window.location.origin,
+            "X-Title": "Manga Translator"
+          },
+          body: JSON.stringify({
+            model: orModel,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: orPrompt },
+                  { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+                ]
+              }
+            ]
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`OpenRouter API error: ${response.status} ${errText}`);
+        }
+
+        const data = await response.json();
+        if (!data.choices || data.choices.length === 0) {
+          throw new Error("OpenRouter API returned an empty response.");
+        }
+        let jsonStr = data.choices[0].message?.content || "[]";
+        
+        if (typeof jsonStr === 'string') {
+          jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
+          const match = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
+          if (match) {
+            jsonStr = match[0];
+          }
+          return JSON.parse(jsonStr) as TranslationBlock[];
+        }
+        return [];
+      }
+
+      const ai = getAiInstance();
       const response = await ai.models.generateContent({
         model: modelName,
         contents: {

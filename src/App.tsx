@@ -11,6 +11,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { translateMangaPage, TranslationBlock } from './utils/geminiService';
 import { saveToHistory, HistoryItem } from './utils/historyService';
 import { getTranslationMemory, saveToTranslationMemory, clearTranslationMemory } from './utils/translationMemoryService';
+import { safeGetItem, safeSetItem } from './utils/storage';
 import { compressImage } from './utils/imageCompressor';
 import { Loader2, RefreshCw, Languages, AlertCircle, ArrowRight, Download, ChevronLeft, ChevronRight, Trash2, Clock, Archive, Play, Database, Settings, Square } from 'lucide-react';
 import JSZip from 'jszip';
@@ -37,26 +38,26 @@ export default function App() {
   const [showConfirmClearMemory, setShowConfirmClearMemory] = useState(false);
   
   const [sourceLang, setSourceLang] = useState(() => {
-    return localStorage.getItem('manga_source_lang') || 'Japanese';
+    return safeGetItem('manga_source_lang') || 'Japanese';
   });
   const [targetLang, setTargetLang] = useState(() => {
-    return localStorage.getItem('manga_target_lang') || 'Hindi';
+    return safeGetItem('manga_target_lang') || 'Hindi';
   });
   const [selectedModel, setSelectedModel] = useState(() => {
-    return localStorage.getItem('manga_selected_model') || 'gemini-3.1-pro-preview';
+    return safeGetItem('manga_selected_model') || 'gemini-3-flash-preview';
   });
   const [autoDownload, setAutoDownload] = useState(() => {
-    return localStorage.getItem('manga_auto_download') === 'true';
+    return safeGetItem('manga_auto_download') === 'true';
   });
   const [customPrompt, setCustomPrompt] = useState(() => {
-    return localStorage.getItem('manga_custom_prompt') || '';
+    return safeGetItem('manga_custom_prompt') || '';
   });
 
   // Save languages and prompt to localStorage when they change
   useEffect(() => {
-    localStorage.setItem('manga_source_lang', sourceLang);
-    localStorage.setItem('manga_target_lang', targetLang);
-    localStorage.setItem('manga_custom_prompt', customPrompt);
+    safeSetItem('manga_source_lang', sourceLang);
+    safeSetItem('manga_target_lang', targetLang);
+    safeSetItem('manga_custom_prompt', customPrompt);
   }, [sourceLang, targetLang, customPrompt]);
 
   // Re-translate all if languages or prompt change
@@ -524,12 +525,12 @@ export default function App() {
         selectedModel={selectedModel}
         onModelChange={(model) => {
           setSelectedModel(model);
-          localStorage.setItem('manga_selected_model', model);
+          safeSetItem('manga_selected_model', model);
         }}
         autoDownload={autoDownload}
         onAutoDownloadChange={(val) => {
           setAutoDownload(val);
-          localStorage.setItem('manga_auto_download', String(val));
+          safeSetItem('manga_auto_download', String(val));
         }}
       />
 
