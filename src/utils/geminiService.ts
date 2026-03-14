@@ -127,11 +127,12 @@ Do not skip any text. Be exhaustive.`;
     finalPrompt += `\n\nTranslation Memory (Use these previously translated segments for consistency if you encounter the same or similar text):\n${memoryString}`;
   }
 
-  let retries = 8;
+  let retries = 3;
   let delay = 4000;
 
   while (retries > 0) {
     try {
+      console.log(`[translateMangaPage] Starting translation request. Retries left: ${retries}`);
       if (modelName === 'openrouter-custom') {
         const orKey = getOpenRouterApiKey();
         if (!orKey) {
@@ -161,7 +162,7 @@ Do not skip any text. Be exhaustive.`;
               }
             ]
           })
-        }), 60000); // 60 seconds timeout
+        }), 30000); // 30 seconds timeout
 
         if (!response.ok) {
           const errText = await response.text();
@@ -187,12 +188,25 @@ Do not skip any text. Be exhaustive.`;
         }
 
         if (typeof jsonStr === 'string') {
-          jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
+          console.log("[translateMangaPage] Raw OpenRouter response received:", jsonStr.substring(0, 150) + "...");
+          
           const match = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
           if (match) {
             jsonStr = match[0];
+          } else {
+            jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
           }
-          return { blocks: JSON.parse(jsonStr) as TranslationBlock[], usage };
+          
+          let blocks: TranslationBlock[] = [];
+          try {
+            blocks = JSON.parse(jsonStr) as TranslationBlock[];
+            console.log(`[translateMangaPage] Successfully parsed ${blocks.length} translation blocks from OpenRouter.`);
+          } catch (parseError) {
+            console.error("[translateMangaPage] Failed to parse OpenRouter JSON:", jsonStr);
+            throw new Error("Invalid response format from OpenRouter API. Could not parse translation data.");
+          }
+          
+          return { blocks, usage };
         }
         return { blocks: [], usage };
       }
@@ -233,9 +247,16 @@ Do not skip any text. Be exhaustive.`;
             },
           },
         },
-      }), 60000); // 60 seconds timeout
+      }), 30000); // 30 seconds timeout
 
-      const jsonStr = response.text?.trim() || "[]";
+      let jsonStr = "";
+      try {
+        jsonStr = response.text?.trim() || "[]";
+      } catch (textError) {
+        console.error("[translateMangaPage] Error reading response text:", textError);
+        throw new Error("Failed to read API response. The content might have been blocked by safety filters.");
+      }
+      
       let usage: TokenUsage | undefined;
       if (response.usageMetadata) {
         const promptTokens = response.usageMetadata.promptTokenCount || 0;
@@ -249,9 +270,30 @@ Do not skip any text. Be exhaustive.`;
           estimatedCost
         };
       }
-      return { blocks: JSON.parse(jsonStr) as TranslationBlock[], usage };
+      
+      console.log("[translateMangaPage] Raw API response received:", jsonStr.substring(0, 150) + "...");
+      
+      // Extract JSON array using regex to handle markdown formatting
+      const match = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
+      if (match) {
+        jsonStr = match[0];
+      } else {
+        // Fallback cleanup
+        jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
+      }
+      
+      let blocks: TranslationBlock[] = [];
+      try {
+        blocks = JSON.parse(jsonStr) as TranslationBlock[];
+        console.log(`[translateMangaPage] Successfully parsed ${blocks.length} translation blocks.`);
+      } catch (parseError) {
+        console.error("[translateMangaPage] Failed to parse JSON:", jsonStr);
+        throw new Error("Invalid response format from API. Could not parse translation data.");
+      }
+      
+      return { blocks, usage };
     } catch (e: any) {
-      console.error("Gemini API Error:", e);
+      console.error("[translateMangaPage] Gemini API Error:", e);
       const errorMessage = e.message || String(e);
       
       // Check if it's a rate limit, quota error, 503 service unavailable, or timeout
@@ -268,7 +310,7 @@ Do not skip any text. Be exhaustive.`;
         if (retries === 0) {
           throw new Error("API is currently overloaded or rate limit reached. Please wait a moment and try again, or add your own API key in Settings.");
         }
-        console.log(`API overloaded/rate limit hit. Retrying in ${delay}ms... (${retries} retries left)`);
+        console.log(`[translateMangaPage] API overloaded/rate limit hit. Retrying in ${delay}ms... (${retries} retries left)`);
         await new Promise(resolve => setTimeout(resolve, delay));
         delay = Math.min(delay * 2, 30000); // Exponential backoff, capped at 30 seconds
       } else {

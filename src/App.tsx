@@ -88,13 +88,7 @@ export default function App() {
     const item = currentItem || items[index];
     if (!item) return;
 
-    setItems(prev => {
-      const next = [...prev];
-      if (next[index]) {
-        next[index] = { ...next[index], status: 'translating', error: undefined };
-      }
-      return next;
-    });
+    setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'translating', error: undefined } : i));
 
     try {
       let base64String = '';
@@ -129,13 +123,7 @@ export default function App() {
         // Save new translations to memory
         await saveMultipleToTranslationMemory(sourceLang, targetLang, result.blocks);
 
-        setItems(prev => {
-          const next = [...prev];
-          if (next[index]) {
-            next[index] = { ...next[index], status: 'done', blocks: result.blocks, usage: result.usage };
-          }
-          return next;
-        });
+        setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'done', blocks: result.blocks, usage: result.usage } : i));
         
         // Save to history
         saveToHistory({
@@ -151,15 +139,9 @@ export default function App() {
         throw new Error("Failed to read image data.");
       }
     } catch (err) {
-      console.error(err);
+      console.error("[translateItem] Error:", err);
       const errorMessage = err instanceof Error ? err.message : "An error occurred during translation.";
-      setItems(prev => {
-        const next = [...prev];
-        if (next[index]) {
-          next[index] = { ...next[index], status: 'error', error: errorMessage };
-        }
-        return next;
-      });
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'error', error: errorMessage } : i));
     }
   };
 
