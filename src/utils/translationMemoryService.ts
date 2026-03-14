@@ -55,6 +55,46 @@ export async function saveToTranslationMemory(
   }
 }
 
+export async function saveMultipleToTranslationMemory(
+  sourceLang: string,
+  targetLang: string,
+  blocks: { originalText: string; translatedText: string }[]
+): Promise<void> {
+  if (!blocks || blocks.length === 0) return;
+
+  try {
+    const key = `${MEMORY_KEY_PREFIX}${sourceLang}_${targetLang}`;
+    const memory = await getTranslationMemory(sourceLang, targetLang);
+    
+    let added = false;
+    for (const block of blocks) {
+      if (!block.originalText.trim() || !block.translatedText.trim()) continue;
+      memory[block.originalText] = {
+        originalText: block.originalText,
+        translatedText: block.translatedText,
+        timestamp: Date.now(),
+      };
+      added = true;
+    }
+
+    if (!added) return;
+
+    // Limit memory size to prevent token overflow (e.g., keep latest 500 entries)
+    const entries = Object.values(memory).sort((a, b) => b.timestamp - a.timestamp);
+    if (entries.length > 500) {
+      const trimmedMemory: TranslationMemory = {};
+      entries.slice(0, 500).forEach(entry => {
+        trimmedMemory[entry.originalText] = entry;
+      });
+      await set(key, trimmedMemory);
+    } else {
+      await set(key, memory);
+    }
+  } catch (e) {
+    console.warn("Failed to save multiple to translation memory", e);
+  }
+}
+
 export async function clearTranslationMemory(sourceLang: string, targetLang: string): Promise<void> {
   try {
     const key = `${MEMORY_KEY_PREFIX}${sourceLang}_${targetLang}`;

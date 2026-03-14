@@ -1,4 +1,4 @@
-export const compressImage = (file: File, maxWidth = 1200, maxHeight = 1200): Promise<string> => {
+export const compressImage = (file: File, maxWidth = 1024, maxHeight = 1024): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -30,8 +30,8 @@ export const compressImage = (file: File, maxWidth = 1200, maxHeight = 1200): Pr
           return;
         }
         ctx.drawImage(img, 0, 0, width, height);
-        // Use JPEG for faster upload and processing, quality 0.85 is good enough for OCR
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
+        // Use JPEG for faster upload and processing, quality 0.80 is good enough for OCR and saves bandwidth/tokens
+        resolve(canvas.toDataURL('image/jpeg', 0.80));
       };
       img.onerror = (error) => reject(error);
     };

@@ -8,12 +8,12 @@ import { ImageUploader } from './components/ImageUploader';
 import { TranslationOverlay } from './components/TranslationOverlay';
 import { HistoryModal } from './components/HistoryModal';
 import { SettingsModal } from './components/SettingsModal';
-import { translateMangaPage, TranslationBlock } from './utils/geminiService';
+import { translateMangaPage, TranslationBlock, TokenUsage } from './utils/geminiService';
 import { saveToHistory, HistoryItem } from './utils/historyService';
-import { getTranslationMemory, saveToTranslationMemory, clearTranslationMemory } from './utils/translationMemoryService';
+import { getTranslationMemory, saveToTranslationMemory, saveMultipleToTranslationMemory, clearTranslationMemory } from './utils/translationMemoryService';
 import { safeGetItem, safeSetItem } from './utils/storage';
 import { compressImage } from './utils/imageCompressor';
-import { Loader2, RefreshCw, Languages, AlertCircle, ArrowRight, Download, ChevronLeft, ChevronRight, Trash2, Clock, Archive, Play, Database, Settings, Square } from 'lucide-react';
+import { Loader2, RefreshCw, Languages, AlertCircle, ArrowRight, Download, ChevronLeft, ChevronRight, Trash2, Clock, Archive, Play, Database, Settings, Square, Info } from 'lucide-react';
 import JSZip from 'jszip';
 import { jsPDF } from 'jspdf';
 
@@ -24,6 +24,7 @@ interface TranslationItem {
   status: 'pending' | 'translating' | 'done' | 'error';
   blocks?: TranslationBlock[];
   error?: string;
+  usage?: TokenUsage;
 }
 
 export default function App() {
@@ -33,6 +34,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
   const [batchMode, setBatchMode] = useState<'sequential' | 'parallel'>('sequential');
+  const [batchSize, setBatchSize] = useState<number>(2);
   const [isBatchTranslating, setIsBatchTranslating] = useState(false);
   const stopBatchRef = useRef(false);
   const [showConfirmClearMemory, setShowConfirmClearMemory] = useState(false);
@@ -109,21 +111,24 @@ export default function App() {
         const base64Data = matches[2];
         
         const memory = await getTranslationMemory(sourceLang, targetLang);
+        // Limit to 50 most recent entries to save tokens and avoid quota limits
+        const recentMemoryEntries = Object.values(memory)
+          .sort((a, b) => b.timestamp - a.timestamp)
+          .slice(0, 50);
+          
         const memoryDict = Object.fromEntries(
-          Object.entries(memory).map(([k, v]) => [k, v.translatedText])
+          recentMemoryEntries.map(entry => [entry.originalText, entry.translatedText])
         );
 
         const result = await translateMangaPage(base64Data, mimeType, sourceLang, targetLang, customPrompt, memoryDict, selectedModel);
         
         // Save new translations to memory
-        for (const block of result) {
-          await saveToTranslationMemory(sourceLang, targetLang, block.originalText, block.translatedText);
-        }
+        await saveMultipleToTranslationMemory(sourceLang, targetLang, result.blocks);
 
         setItems(prev => {
           const next = [...prev];
           if (next[index]) {
-            next[index] = { ...next[index], status: 'done', blocks: result };
+            next[index] = { ...next[index], status: 'done', blocks: result.blocks, usage: result.usage };
           }
           return next;
         });
@@ -135,7 +140,8 @@ export default function App() {
           imageUrl: base64String,
           sourceLang,
           targetLang,
-          blocks: result
+          blocks: result.blocks,
+          usage: result.usage
         });
       } else {
         throw new Error("Failed to read image data.");
@@ -167,24 +173,23 @@ export default function App() {
       for (const { item, index } of pendingItems) {
         if (stopBatchRef.current) break;
         await translateItem(index, item);
-        // Add a small delay between requests to help avoid rate limits
+        // Add a delay between requests to help avoid rate limits (15 RPM limit on free tier)
         if (!stopBatchRef.current) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise(resolve => setTimeout(resolve, 4000));
         }
       }
     } else {
       // Parallel mode with concurrency limit
-      const CONCURRENCY_LIMIT = 4;
-      for (let i = 0; i < pendingItems.length; i += CONCURRENCY_LIMIT) {
+      for (let i = 0; i < pendingItems.length; i += batchSize) {
         if (stopBatchRef.current) break;
-        const chunk = pendingItems.slice(i, i + CONCURRENCY_LIMIT);
+        const chunk = pendingItems.slice(i, i + batchSize);
         await Promise.all(chunk.map(async ({ item, index }) => {
           if (stopBatchRef.current) return;
           await translateItem(index, item);
         }));
-        // Add a small delay between chunks to help avoid rate limits
-        if (!stopBatchRef.current && i + CONCURRENCY_LIMIT < pendingItems.length) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        // Add a delay between chunks to help avoid rate limits (15 RPM limit on free tier)
+        if (!stopBatchRef.current && i + batchSize < pendingItems.length) {
+          await new Promise(resolve => setTimeout(resolve, 4000));
         }
       }
     }
@@ -223,6 +228,27 @@ export default function App() {
         next[currentIndex] = {
           ...currentItem,
           blocks: currentItem.blocks.filter((_, idx) => idx !== indexToDelete)
+        };
+      }
+      return next;
+    });
+  };
+
+  const handleEditBlock = async (indexToEdit: number, newText: string) => {
+    setItems(prev => {
+      const next = [...prev];
+      const currentItem = next[currentIndex];
+      if (currentItem && currentItem.blocks) {
+        const newBlocks = [...currentItem.blocks];
+        const block = newBlocks[indexToEdit];
+        if (block) {
+          block.translatedText = newText;
+          // Save the edited translation to memory
+          saveToTranslationMemory(sourceLang, targetLang, block.originalText, newText).catch(console.error);
+        }
+        next[currentIndex] = {
+          ...currentItem,
+          blocks: newBlocks
         };
       }
       return next;
@@ -433,6 +459,7 @@ export default function App() {
       imageUrl: historyItem.imageUrl,
       status: 'done',
       blocks: historyItem.blocks,
+      usage: historyItem.usage,
     };
     
     setItems(prev => [...prev, newItem]);
@@ -642,6 +669,18 @@ export default function App() {
                       <option value="sequential">Sequential</option>
                       <option value="parallel">Parallel</option>
                     </select>
+                    {batchMode === 'parallel' && (
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={batchSize}
+                        onChange={(e) => setBatchSize(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                        className="w-16 text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 py-2 px-2"
+                        title="Batch Size (1-10)"
+                        disabled={isBatchTranslating}
+                      />
+                    )}
                     {isBatchTranslating ? (
                       <button
                         onClick={handleStopBatch}
@@ -742,10 +781,25 @@ export default function App() {
                 )}
 
                 {currentItem.status === 'done' && currentItem.blocks && (
-                  <div className="w-full space-y-8">
-                    <TranslationOverlay imageUrl={currentItem.imageUrl} blocks={currentItem.blocks} onDeleteBlock={handleDeleteBlock} />
+                  <div className="w-full space-y-6">
+                    <TranslationOverlay imageUrl={currentItem.imageUrl} blocks={currentItem.blocks} onDeleteBlock={handleDeleteBlock} onEditBlock={handleEditBlock} />
                     
-                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                    {currentItem.usage && (
+                      <div className="flex items-center justify-center text-sm text-gray-500 space-x-6 bg-white py-3 px-6 rounded-full shadow-sm border border-gray-100 w-max mx-auto">
+                        <div className="flex items-center space-x-2" title="Tokens used">
+                          <Database className="w-4 h-4 text-indigo-400" />
+                          <span className="font-medium">{currentItem.usage.totalTokens.toLocaleString()} tokens</span>
+                        </div>
+                        {currentItem.usage.estimatedCost !== undefined && (
+                          <div className="flex items-center space-x-2" title="Estimated cost">
+                            <Info className="w-4 h-4 text-emerald-400" />
+                            <span className="font-medium">~${currentItem.usage.estimatedCost.toFixed(4)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
                       <button
                         onClick={handleDownload}
                         className="flex items-center justify-center space-x-2 w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full font-medium shadow-lg shadow-indigo-200 transition-all active:scale-95"

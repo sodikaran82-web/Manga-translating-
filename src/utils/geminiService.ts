@@ -64,6 +64,30 @@ export interface TranslationBlock {
   translatedText: string;
 }
 
+export interface TokenUsage {
+  promptTokens: number;
+  candidatesTokens: number;
+  totalTokens: number;
+  estimatedCost?: number; // in USD
+}
+
+export interface TranslationResult {
+  blocks: TranslationBlock[];
+  usage?: TokenUsage;
+}
+
+function calculateGeminiCost(promptTokens: number, candidatesTokens: number, modelName: string): number {
+  let inputPricePerM = 0.075;
+  let outputPricePerM = 0.30;
+  
+  if (modelName.includes('pro')) {
+    inputPricePerM = 1.25;
+    outputPricePerM = 5.00;
+  }
+  
+  return (promptTokens / 1000000) * inputPricePerM + (candidatesTokens / 1000000) * outputPricePerM;
+}
+
 export async function translateMangaPage(
   base64Image: string, 
   mimeType: string,
@@ -72,7 +96,7 @@ export async function translateMangaPage(
   customPrompt?: string,
   translationMemory?: Record<string, string>,
   modelName: string = "gemini-3-flash-preview"
-): Promise<TranslationBlock[]> {
+): Promise<TranslationResult> {
   const defaultPrompt = `Analyze this manga/comic page carefully. You must find and extract EVERY SINGLE piece of text on the page. This includes:
 1. All main dialogue in speech bubbles.
 2. Thought bubbles and narration boxes.
@@ -141,15 +165,27 @@ Do not skip any text. Be exhaustive.`;
         }
         let jsonStr = data.choices[0].message?.content || "[]";
         
+        let usage: TokenUsage | undefined;
+        if (data.usage) {
+          const promptTokens = data.usage.prompt_tokens || 0;
+          const candidatesTokens = data.usage.completion_tokens || 0;
+          const totalTokens = data.usage.total_tokens || 0;
+          usage = {
+            promptTokens,
+            candidatesTokens,
+            totalTokens,
+          };
+        }
+
         if (typeof jsonStr === 'string') {
           jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
           const match = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
           if (match) {
             jsonStr = match[0];
           }
-          return JSON.parse(jsonStr) as TranslationBlock[];
+          return { blocks: JSON.parse(jsonStr) as TranslationBlock[], usage };
         }
-        return [];
+        return { blocks: [], usage };
       }
 
       const ai = getAiInstance();
@@ -191,7 +227,20 @@ Do not skip any text. Be exhaustive.`;
       });
 
       const jsonStr = response.text?.trim() || "[]";
-      return JSON.parse(jsonStr) as TranslationBlock[];
+      let usage: TokenUsage | undefined;
+      if (response.usageMetadata) {
+        const promptTokens = response.usageMetadata.promptTokenCount || 0;
+        const candidatesTokens = response.usageMetadata.candidatesTokenCount || 0;
+        const totalTokens = response.usageMetadata.totalTokenCount || 0;
+        const estimatedCost = calculateGeminiCost(promptTokens, candidatesTokens, modelName);
+        usage = {
+          promptTokens,
+          candidatesTokens,
+          totalTokens,
+          estimatedCost
+        };
+      }
+      return { blocks: JSON.parse(jsonStr) as TranslationBlock[], usage };
     } catch (e: any) {
       console.error("Gemini API Error:", e);
       const errorMessage = e.message || String(e);
@@ -219,5 +268,5 @@ Do not skip any text. Be exhaustive.`;
     }
   }
   
-  return [];
+  return { blocks: [] };
 }

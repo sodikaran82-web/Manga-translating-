@@ -6,6 +6,7 @@ interface TranslationOverlayProps {
   imageUrl: string;
   blocks: TranslationBlock[];
   onDeleteBlock?: (index: number) => void;
+  onEditBlock?: (index: number, newText: string) => void;
 }
 
 function AutoText({ text, originalText, isSelected }: { text: string, originalText: string, isSelected: boolean }) {
@@ -81,8 +82,9 @@ function AutoText({ text, originalText, isSelected }: { text: string, originalTe
   );
 }
 
-export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock }: TranslationOverlayProps) {
+export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBlock }: TranslationOverlayProps) {
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState<string>('');
 
   // Re-run scaling when window resizes
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
@@ -91,6 +93,26 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock }: Translat
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  const handleSelectBlock = (index: number, currentText: string) => {
+    if (selectedBlock === index) {
+      setSelectedBlock(null);
+    } else {
+      setSelectedBlock(index);
+      setEditingText(currentText);
+    }
+  };
+
+  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setEditingText(e.target.value);
+  };
+
+  const handleSaveEdit = (index: number) => {
+    if (onEditBlock && editingText.trim() !== blocks[index].translatedText) {
+      onEditBlock(index, editingText.trim());
+    }
+    setSelectedBlock(null);
+  };
 
   return (
     <div className="relative w-full max-w-2xl mx-auto overflow-hidden rounded-xl shadow-lg border border-gray-200 bg-gray-50">
@@ -113,10 +135,10 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock }: Translat
         return (
           <div
             key={`${index}-${windowWidth}`} // Force re-render on resize for AutoText
-            className={`absolute transition-all duration-200 ease-in-out cursor-pointer flex flex-col items-center justify-center ${
+            className={`absolute transition-all duration-200 ease-in-out flex flex-col items-center justify-center ${
               isSelected 
                 ? 'bg-white z-50 shadow-2xl rounded p-3 sm:p-4 border-2 border-indigo-600' 
-                : 'bg-white z-10 rounded hover:ring-2 hover:ring-indigo-400'
+                : 'bg-white z-10 rounded hover:ring-2 hover:ring-indigo-400 cursor-pointer'
             }`}
             style={{ 
               top, 
@@ -128,7 +150,11 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock }: Translat
               maxWidth: isSelected ? '280px' : undefined,
               boxShadow: isSelected ? undefined : 'none',
             }}
-            onClick={() => setSelectedBlock(isSelected ? null : index)}
+            onClick={(e) => {
+              if (!isSelected) {
+                handleSelectBlock(index, block.translatedText);
+              }
+            }}
           >
             {isSelected && onDeleteBlock && (
               <button
@@ -143,7 +169,33 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock }: Translat
                 <X className="w-4 h-4" />
               </button>
             )}
-            <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} />
+            
+            {isSelected ? (
+              <div className="flex flex-col w-full min-w-[200px]" onClick={(e) => e.stopPropagation()}>
+                <textarea
+                  value={editingText}
+                  onChange={handleTextChange}
+                  className="w-full p-2 border border-gray-300 rounded text-sm mb-2 resize-y min-h-[80px] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  autoFocus
+                />
+                <div className="flex justify-end space-x-2">
+                  <button
+                    onClick={() => setSelectedBlock(null)}
+                    className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleSaveEdit(index)}
+                    className="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} />
+            )}
           </div>
         );
       })}

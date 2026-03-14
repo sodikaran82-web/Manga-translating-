@@ -1,5 +1,5 @@
 import { get, set } from 'idb-keyval';
-import { TranslationBlock } from './geminiService';
+import { TranslationBlock, TokenUsage } from './geminiService';
 
 export interface HistoryItem {
   id: string;
@@ -8,6 +8,7 @@ export interface HistoryItem {
   sourceLang: string;
   targetLang: string;
   blocks: TranslationBlock[];
+  usage?: TokenUsage;
 }
 
 const HISTORY_KEY = 'manga_translation_history';
