@@ -11,6 +11,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { translateMangaPage, TranslationBlock, TokenUsage } from './utils/geminiService';
 import { saveToHistory, HistoryItem } from './utils/historyService';
 import { getTranslationMemory, saveToTranslationMemory, saveMultipleToTranslationMemory, clearTranslationMemory } from './utils/translationMemoryService';
+import { translationQueue } from './utils/requestQueue';
 import { safeGetItem, safeSetItem } from './utils/storage';
 import { compressImage } from './utils/imageCompressor';
 import { Loader2, RefreshCw, Languages, AlertCircle, ArrowRight, Download, ChevronLeft, ChevronRight, Trash2, Clock, Archive, Play, Database, Settings, Square, Info } from 'lucide-react';
@@ -120,7 +121,10 @@ export default function App() {
           recentMemoryEntries.map(entry => [entry.originalText, entry.translatedText])
         );
 
-        const result = await translateMangaPage(base64Data, mimeType, sourceLang, targetLang, customPrompt, memoryDict, selectedModel);
+        // Add the request to the global queue to enforce rate limits
+        const result = await translationQueue.add(() => 
+          translateMangaPage(base64Data, mimeType, sourceLang, targetLang, customPrompt, memoryDict, selectedModel)
+        );
         
         // Save new translations to memory
         await saveMultipleToTranslationMemory(sourceLang, targetLang, result.blocks);
@@ -169,30 +173,16 @@ export default function App() {
     setIsBatchTranslating(true);
     stopBatchRef.current = false;
 
-    if (batchMode === 'sequential') {
-      for (const { item, index } of pendingItems) {
-        if (stopBatchRef.current) break;
-        await translateItem(index, item);
-        // Add a delay between requests to help avoid rate limits (15 RPM limit on free tier)
-        if (!stopBatchRef.current) {
-          await new Promise(resolve => setTimeout(resolve, 6000));
-        }
-      }
-    } else {
-      // Parallel mode with concurrency limit
-      for (let i = 0; i < pendingItems.length; i += batchSize) {
-        if (stopBatchRef.current) break;
-        const chunk = pendingItems.slice(i, i + batchSize);
-        await Promise.all(chunk.map(async ({ item, index }) => {
-          if (stopBatchRef.current) return;
-          await translateItem(index, item);
-        }));
-        // Add a delay between chunks to help avoid rate limits (15 RPM limit on free tier)
-        if (!stopBatchRef.current && i + batchSize < pendingItems.length) {
-          await new Promise(resolve => setTimeout(resolve, 6000));
-        }
-      }
-    }
+    // Set delay based on batch mode (parallel can be faster if using paid API, but queue still protects it)
+    translationQueue.setDelay(batchMode === 'parallel' ? 2000 : 6000);
+
+    // Map all pending items to promises. The translationQueue will handle rate limiting and sequential execution automatically.
+    const promises = pendingItems.map(async ({ item, index }) => {
+      if (stopBatchRef.current) return;
+      await translateItem(index, item);
+    });
+
+    await Promise.all(promises);
 
     setIsBatchTranslating(false);
     
@@ -204,6 +194,7 @@ export default function App() {
 
   const handleStopBatch = () => {
     stopBatchRef.current = true;
+    translationQueue.clear(); // Clear any pending requests in the queue
     setIsBatchTranslating(false);
   };
 

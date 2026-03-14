@@ -88,6 +88,15 @@ function calculateGeminiCost(promptTokens: number, candidatesTokens: number, mod
   return (promptTokens / 1000000) * inputPricePerM + (candidatesTokens / 1000000) * outputPricePerM;
 }
 
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => 
+      setTimeout(() => reject(new Error(`Request timed out after ${ms / 1000} seconds`)), ms)
+    )
+  ]);
+};
+
 export async function translateMangaPage(
   base64Image: string, 
   mimeType: string,
@@ -132,7 +141,7 @@ Do not skip any text. Be exhaustive.`;
         
         const orPrompt = `${finalPrompt}\n\nIMPORTANT: You must return ONLY a valid JSON array of objects. Do not include markdown formatting like \`\`\`json. Just the raw JSON array. Each object must have: box_2d (array of 4 integers 0-1000), originalText (string), translatedText (string).`;
         
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        const response = await withTimeout(fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${orKey}`,
@@ -152,7 +161,7 @@ Do not skip any text. Be exhaustive.`;
               }
             ]
           })
-        });
+        }), 60000); // 60 seconds timeout
 
         if (!response.ok) {
           const errText = await response.text();
@@ -189,7 +198,7 @@ Do not skip any text. Be exhaustive.`;
       }
 
       const ai = getAiInstance();
-      const response = await ai.models.generateContent({
+      const response = await withTimeout(ai.models.generateContent({
         model: modelName,
         contents: {
           parts: [
@@ -224,7 +233,7 @@ Do not skip any text. Be exhaustive.`;
             },
           },
         },
-      });
+      }), 60000); // 60 seconds timeout
 
       const jsonStr = response.text?.trim() || "[]";
       let usage: TokenUsage | undefined;
@@ -245,14 +254,15 @@ Do not skip any text. Be exhaustive.`;
       console.error("Gemini API Error:", e);
       const errorMessage = e.message || String(e);
       
-      // Check if it's a rate limit, quota error, or 503 service unavailable
+      // Check if it's a rate limit, quota error, 503 service unavailable, or timeout
       if (
         errorMessage.toLowerCase().includes("quota") || 
         errorMessage.toLowerCase().includes("429") || 
         errorMessage.toLowerCase().includes("too many requests") ||
         errorMessage.toLowerCase().includes("503") ||
         errorMessage.toLowerCase().includes("unavailable") ||
-        errorMessage.toLowerCase().includes("high demand")
+        errorMessage.toLowerCase().includes("high demand") ||
+        errorMessage.toLowerCase().includes("timed out")
       ) {
         retries--;
         if (retries === 0) {
