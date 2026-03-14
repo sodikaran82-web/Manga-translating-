@@ -142,6 +142,9 @@ export default function App() {
       console.error("[translateItem] Error:", err);
       const errorMessage = err instanceof Error ? err.message : "An error occurred during translation.";
       setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'error', error: errorMessage } : i));
+    } finally {
+      // Ensure loading state is cleared if it somehow got stuck
+      setItems(prev => prev.map(i => i.id === item.id && i.status === 'translating' ? { ...i, status: 'error', error: 'Translation interrupted.' } : i));
     }
   };
 
@@ -155,22 +158,26 @@ export default function App() {
     setIsBatchTranslating(true);
     stopBatchRef.current = false;
 
-    // Set delay based on batch mode (parallel can be faster if using paid API, but queue still protects it)
-    translationQueue.setDelay(batchMode === 'parallel' ? 2000 : 6000);
+    try {
+      // Set delay based on batch mode (parallel can be faster if using paid API, but queue still protects it)
+      translationQueue.setDelay(batchMode === 'parallel' ? 2000 : 6000);
 
-    // Map all pending items to promises. The translationQueue will handle rate limiting and sequential execution automatically.
-    const promises = pendingItems.map(async ({ item, index }) => {
-      if (stopBatchRef.current) return;
-      await translateItem(index, item);
-    });
+      // Map all pending items to promises. The translationQueue will handle rate limiting and sequential execution automatically.
+      const promises = pendingItems.map(async ({ item, index }) => {
+        if (stopBatchRef.current) return;
+        await translateItem(index, item);
+      });
 
-    await Promise.all(promises);
-
-    setIsBatchTranslating(false);
-    
-    // Auto-download if enabled and not stopped manually
-    if (!stopBatchRef.current && autoDownload) {
-      handleDownloadAll();
+      await Promise.allSettled(promises);
+      
+      // Auto-download if enabled and not stopped manually
+      if (!stopBatchRef.current && autoDownload) {
+        handleDownloadAll();
+      }
+    } catch (error) {
+      console.error("Batch translation error:", error);
+    } finally {
+      setIsBatchTranslating(false);
     }
   };
 
