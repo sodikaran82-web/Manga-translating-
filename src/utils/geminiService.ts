@@ -118,8 +118,8 @@ Do not skip any text. Be exhaustive.`;
     finalPrompt += `\n\nTranslation Memory (Use these previously translated segments for consistency if you encounter the same or similar text):\n${memoryString}`;
   }
 
-  let retries = 5;
-  let delay = 3000;
+  let retries = 8;
+  let delay = 4000;
 
   while (retries > 0) {
     try {
@@ -260,7 +260,7 @@ Do not skip any text. Be exhaustive.`;
         }
         console.log(`API overloaded/rate limit hit. Retrying in ${delay}ms... (${retries} retries left)`);
         await new Promise(resolve => setTimeout(resolve, delay));
-        delay *= 2; // Exponential backoff
+        delay = Math.min(delay * 2, 30000); // Exponential backoff, capped at 30 seconds
       } else {
         // For other errors, throw immediately
         throw new Error(`Translation failed: ${errorMessage}`);

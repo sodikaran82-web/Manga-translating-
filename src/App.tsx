@@ -175,7 +175,7 @@ export default function App() {
         await translateItem(index, item);
         // Add a delay between requests to help avoid rate limits (15 RPM limit on free tier)
         if (!stopBatchRef.current) {
-          await new Promise(resolve => setTimeout(resolve, 4000));
+          await new Promise(resolve => setTimeout(resolve, 6000));
         }
       }
     } else {
@@ -189,7 +189,7 @@ export default function App() {
         }));
         // Add a delay between chunks to help avoid rate limits (15 RPM limit on free tier)
         if (!stopBatchRef.current && i + batchSize < pendingItems.length) {
-          await new Promise(resolve => setTimeout(resolve, 4000));
+          await new Promise(resolve => setTimeout(resolve, 6000));
         }
       }
     }
