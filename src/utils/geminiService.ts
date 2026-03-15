@@ -92,6 +92,45 @@ const withTimeout = <T>(requestFn: (signal: AbortSignal) => Promise<T>, ms: numb
   });
 };
 
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_CHUNK_SIZE = 12;
+
+const translationCache = new Map<string, { value: any, ts: number }>();
+
+function normalizeText(text: string) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getCacheKey(targetLanguage: string, bubbles: string[]) {
+  return `${targetLanguage}::${bubbles.map(normalizeText).join("\n")}`;
+}
+
+function getCached(key: string) {
+  const hit = translationCache.get(key);
+  if (!hit) return null;
+
+  if (Date.now() - hit.ts > CACHE_TTL_MS) {
+    translationCache.delete(key);
+    return null;
+  }
+
+  return hit.value;
+}
+
+function setCached(key: string, value: any) {
+  translationCache.set(key, { value, ts: Date.now() });
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const out = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}
+
 export async function translateMangaPage(
   base64Image: string, 
   mimeType: string,
@@ -101,7 +140,30 @@ export async function translateMangaPage(
   translationMemory?: Record<string, string>,
   modelName: string = "gemini-3-flash-preview"
 ): Promise<TranslationResult> {
-  const defaultPrompt = `Analyze this manga/comic page carefully. You must find and extract EVERY SINGLE piece of text on the page. This includes:
+  const apiKey = getCustomApiKey() || (process.env.GEMINI_API_KEY as string);
+  
+  if (!apiKey && modelName !== 'openrouter-custom') {
+    throw new Error("Gemini API key is missing. Please add it in Settings.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  const model = modelName || "gemini-3-flash-preview";
+
+  let retries = 3;
+  let delay = 4000;
+
+  while (retries > 0) {
+    try {
+      console.log(`[translateMangaPage] Starting translation request. Retries left: ${retries}`);
+      
+      if (modelName === 'openrouter-custom') {
+        const orKey = getOpenRouterApiKey();
+        if (!orKey) {
+          throw new Error("OpenRouter API key is missing. Please add it in Settings.");
+        }
+        const orModel = getCustomOpenRouterModel() || 'anthropic/claude-3-opus';
+        
+        const defaultPrompt = `Analyze this manga/comic page carefully. You must find and extract EVERY SINGLE piece of text on the page. This includes:
 1. All main dialogue in speech bubbles.
 2. Thought bubbles and narration boxes.
 3. Small text outside bubbles (e.g., character side comments, background text).
@@ -113,27 +175,14 @@ For EACH piece of text found:
 3. Provide its bounding box as [ymin, xmin, ymax, xmax] where coordinates are normalized between 0 and 1000.
 
 Do not skip any text. Be exhaustive.`;
-  let finalPrompt = customPrompt ? `${defaultPrompt}\n\nAdditional Instructions:\n${customPrompt}` : defaultPrompt;
+        let finalPrompt = customPrompt ? `${defaultPrompt}\n\nAdditional Instructions:\n${customPrompt}` : defaultPrompt;
 
-  if (translationMemory && Object.keys(translationMemory).length > 0) {
-    const memoryString = Object.entries(translationMemory)
-      .map(([orig, trans]) => `"${orig}" -> "${trans}"`)
-      .join('\n');
-    finalPrompt += `\n\nTranslation Memory (Use these previously translated segments for consistency if you encounter the same or similar text):\n${memoryString}`;
-  }
-
-  let retries = 3;
-  let delay = 4000;
-
-  while (retries > 0) {
-    try {
-      console.log(`[translateMangaPage] Starting translation request. Retries left: ${retries}`);
-      if (modelName === 'openrouter-custom') {
-        const orKey = getOpenRouterApiKey();
-        if (!orKey) {
-          throw new Error("OpenRouter API key is missing. Please add it in Settings.");
+        if (translationMemory && Object.keys(translationMemory).length > 0) {
+          const memoryString = Object.entries(translationMemory)
+            .map(([orig, trans]) => `"${orig}" -> "${trans}"`)
+            .join('\n');
+          finalPrompt += `\n\nTranslation Memory (Use these previously translated segments for consistency if you encounter the same or similar text):\n${memoryString}`;
         }
-        const orModel = getCustomOpenRouterModel() || 'anthropic/claude-3-opus';
         
         const orPrompt = `${finalPrompt}\n\nIMPORTANT: You must return ONLY a valid JSON array of objects. Do not include markdown formatting like \`\`\`json. Just the raw JSON array. Each object must have: box_2d (array of 4 integers 0-1000), originalText (string), translatedText (string).`;
         
@@ -207,42 +256,171 @@ Do not skip any text. Be exhaustive.`;
         return { blocks: [], usage };
       }
 
-      if (modelName !== 'openrouter-custom') {
-        const customApiKey = safeGetItem('custom_gemini_api_key');
-        const response = await withTimeout((signal) => fetch("/api/translate-page", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            base64Image,
-            mimeType,
-            sourceLanguage,
-            targetLanguage,
-            customPrompt,
-            modelName,
-            translationMemory,
-            customApiKey
-          }),
-          signal
-        }), 60000); // 60 seconds timeout for full OCR + translation
+      // Gemini Logic (Frontend)
+      console.log("[translateMangaPage] Starting OCR...");
+      const ocrPrompt = `Analyze this manga/comic page carefully. You must find and extract EVERY SINGLE piece of text on the page. This includes:
+1. All main dialogue in speech bubbles.
+2. Thought bubbles and narration boxes.
+3. Small text outside bubbles (e.g., character side comments, background text).
+4. Sound effects (SFX) and stylized text.
 
-        const data = await response.json();
+For EACH piece of text found:
+1. Extract the original text (which is in ${sourceLanguage}).
+2. Provide its bounding box as [ymin, xmin, ymax, xmax] where coordinates are normalized between 0 and 1000.
 
-        if (!response.ok) {
-          throw new Error(data?.error || `HTTP ${response.status}`);
+Do not skip any text. Be exhaustive. Return ONLY a valid JSON array.`;
+
+      const ocrResponse = await ai.models.generateContent({
+        model,
+        contents: {
+          parts: [
+            { inlineData: { data: base64Image, mimeType } },
+            { text: ocrPrompt }
+          ]
+        },
+        config: {
+          systemInstruction: "You are an expert manga/comic OCR system. Your job is to extract EVERY SINGLE piece of text on the page. Do not miss any text, no matter how small or stylized. Be extremely thorough.",
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                box_2d: {
+                  type: Type.ARRAY,
+                  items: { type: Type.INTEGER },
+                  description: "Bounding box [ymin, xmin, ymax, xmax] normalized 0-1000",
+                },
+                originalText: { type: Type.STRING },
+              },
+              required: ["box_2d", "originalText"],
+            },
+          },
         }
+      });
 
-        let usage = data.usage;
-        if (usage) {
-          usage.estimatedCost = calculateGeminiCost(usage.promptTokens, usage.candidatesTokens, modelName);
-        }
+      let ocrJsonStr = ocrResponse.text?.trim() || "[]";
+      const match = ocrJsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
+      if (match) ocrJsonStr = match[0];
+      else ocrJsonStr = ocrJsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
 
-        return { blocks: data.blocks || [], usage };
+      let extractedBubbles: { box_2d: number[], originalText: string }[] = [];
+      try {
+        extractedBubbles = JSON.parse(ocrJsonStr);
+      } catch (e) {
+        console.error("[translateMangaPage] Failed to parse OCR JSON:", ocrJsonStr);
+        throw new Error("Invalid response format from OCR.");
       }
+
+      console.log(`[translateMangaPage] OCR found ${extractedBubbles.length} bubbles.`);
+
+      if (extractedBubbles.length === 0) {
+        return { blocks: [], usage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 } };
+      }
+
+      // STEP 2: Translate Chunks
+      const chunks = chunkArray(
+        extractedBubbles.map((b, index) => ({ text: b.originalText, index })),
+        MAX_CHUNK_SIZE
+      );
+
+      const finalTranslations = new Array(extractedBubbles.length).fill("");
+      let totalPromptTokens = ocrResponse.usageMetadata?.promptTokenCount || 0;
+      let totalCandidatesTokens = ocrResponse.usageMetadata?.candidatesTokenCount || 0;
+
+      let memoryString = "";
+      if (translationMemory && Object.keys(translationMemory).length > 0) {
+        memoryString = Object.entries(translationMemory)
+          .map(([orig, trans]) => `"${orig}" -> "${trans}"`)
+          .join('\n');
+      }
+
+      for (const chunk of chunks) {
+        const chunkTexts = chunk.map(item => item.text);
+        const key = getCacheKey(targetLanguage, chunkTexts);
+
+        let translatedChunk = getCached(key);
+
+        if (!translatedChunk) {
+          console.log(`[translateMangaPage] Translating chunk of ${chunk.length} bubbles...`);
+          const translatePrompt = [
+            `Translate the following manga speech bubbles from ${sourceLanguage} into natural ${targetLanguage}.`,
+            "Keep the tone short, conversational, and faithful to the original meaning.",
+            customPrompt ? `Additional Instructions: ${customPrompt}` : "",
+            memoryString ? `\nTranslation Memory (Use these previously translated segments for consistency):\n${memoryString}` : "",
+            "Return ONLY valid JSON that matches the schema.",
+            "",
+            "Bubbles:",
+            ...chunkTexts.map((text, index) => `${index}: ${normalizeText(text)}`)
+          ].join("\n");
+
+          const chunkResponse = await ai.models.generateContent({
+            model,
+            contents: translatePrompt,
+            config: {
+              temperature: 0.2,
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    index: { type: Type.INTEGER },
+                    translation: { type: Type.STRING },
+                  },
+                  required: ["index", "translation"],
+                },
+              },
+            }
+          });
+
+          totalPromptTokens += chunkResponse.usageMetadata?.promptTokenCount || 0;
+          totalCandidatesTokens += chunkResponse.usageMetadata?.candidatesTokenCount || 0;
+
+          let jsonStr = chunkResponse.text?.trim() || "[]";
+          const tMatch = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
+          if (tMatch) jsonStr = tMatch[0];
+          else jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
+
+          try {
+            translatedChunk = JSON.parse(jsonStr);
+            setCached(key, translatedChunk);
+          } catch (e) {
+            console.error("[translateMangaPage] Failed to parse translation JSON:", jsonStr);
+            translatedChunk = [];
+          }
+        } else {
+          console.log(`[translateMangaPage] Using cached translation for chunk of ${chunk.length} bubbles.`);
+        }
+
+        for (const item of translatedChunk) {
+          const originalIndex = chunk[item.index]?.index;
+          if (typeof originalIndex === "number") {
+            finalTranslations[originalIndex] = String(item.translation || "");
+          }
+        }
+      }
+
+      // STEP 3: Merge
+      const blocks = extractedBubbles.map((b, i) => ({
+        box_2d: b.box_2d as [number, number, number, number],
+        originalText: b.originalText,
+        translatedText: finalTranslations[i] || b.originalText
+      }));
+
+      const usage = {
+        promptTokens: totalPromptTokens,
+        candidatesTokens: totalCandidatesTokens,
+        totalTokens: totalPromptTokens + totalCandidatesTokens,
+        estimatedCost: calculateGeminiCost(totalPromptTokens, totalCandidatesTokens, model)
+      };
+
+      return { blocks, usage };
+
     } catch (e: any) {
       console.error("[translateMangaPage] Gemini API Error:", e);
       const errorMessage = e.message || String(e);
       
-      // Check if it's a rate limit, quota error, 503 service unavailable, or timeout
       if (
         errorMessage.toLowerCase().includes("quota") || 
         errorMessage.toLowerCase().includes("429") || 
@@ -258,9 +436,8 @@ Do not skip any text. Be exhaustive.`;
         }
         console.log(`[translateMangaPage] API overloaded/rate limit hit. Retrying in ${delay}ms... (${retries} retries left)`);
         await new Promise(resolve => setTimeout(resolve, delay));
-        delay = Math.min(delay * 2, 30000); // Exponential backoff, capped at 30 seconds
+        delay = Math.min(delay * 2, 30000);
       } else {
-        // For other errors, throw immediately
         throw new Error(`Translation failed: ${errorMessage}`);
       }
     }
