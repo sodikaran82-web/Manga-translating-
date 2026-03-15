@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { Toaster, toast } from 'sonner';
 import { ImageUploader } from './components/ImageUploader';
 import { TranslationOverlay } from './components/TranslationOverlay';
 import { HistoryModal } from './components/HistoryModal';
@@ -90,6 +91,7 @@ export default function App() {
     if (items.length === 0) {
       setCurrentIndex(0);
     }
+    toast.success(`${selectedFiles.length} images added to queue`);
   };
 
   const translateItem = async (index: number, currentItem?: TranslationItem): Promise<void> => {
@@ -99,6 +101,7 @@ export default function App() {
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'translating', error: undefined } : i));
 
     try {
+      toast.loading(`Translating page ${index + 1}...`, { id: item.id });
       let base64Data = '';
       let mimeType = 'image/jpeg';
 
@@ -139,6 +142,7 @@ export default function App() {
       await saveMultipleToTranslationMemory(sourceLang, targetLang, result.blocks);
 
       setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'done', blocks: result.blocks, usage: result.usage } : i));
+      toast.success(`Page ${index + 1} translated!`, { id: item.id });
       
       // Save to history
       saveToHistory({
@@ -154,6 +158,10 @@ export default function App() {
       console.error("[translateItem] Error:", err);
       const errorMessage = err instanceof Error ? err.message : "An error occurred during translation.";
       setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'error', error: errorMessage } : i));
+      toast.error(`Failed to translate page ${index + 1}`, { 
+        id: item.id,
+        description: errorMessage 
+      });
     } finally {
       // Ensure loading state is cleared if it somehow got stuck
       setItems(prev => prev.map(i => i.id === item.id && i.status === 'translating' ? { ...i, status: 'error', error: 'Translation interrupted.' } : i));
@@ -197,6 +205,7 @@ export default function App() {
     stopBatchRef.current = true;
     translationQueue.clear(); // Clear any pending requests in the queue
     setIsBatchTranslating(false);
+    toast.info("Batch translation stopped");
   };
 
   const handleReset = () => {
@@ -485,12 +494,14 @@ export default function App() {
   const handleClearMemory = async () => {
     await clearTranslationMemory(sourceLang, targetLang);
     setShowConfirmClearMemory(false);
+    toast.success("Translation memory cleared");
   };
 
   const currentItem = items[currentIndex];
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans pb-12">
+      <Toaster position="top-right" richColors />
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-2">
