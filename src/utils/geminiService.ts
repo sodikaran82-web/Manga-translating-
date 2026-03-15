@@ -2,31 +2,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { safeGetItem, safeSetItem, safeRemoveItem } from './storage';
 
-let aiInstance: GoogleGenAI | null = null;
-
-const getAiInstance = (): GoogleGenAI => {
-  if (!aiInstance) {
-    const key = safeGetItem('custom_gemini_api_key') || process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
-    if (!key) {
-      throw new Error("API key is missing. Please add your Gemini API key in Settings.");
-    }
-    aiInstance = new GoogleGenAI({ apiKey: key });
-  }
-  return aiInstance;
-};
-
 export const setCustomApiKey = (key: string | null) => {
   if (key) {
     safeSetItem('custom_gemini_api_key', key);
-    aiInstance = new GoogleGenAI({ apiKey: key });
   } else {
     safeRemoveItem('custom_gemini_api_key');
-    const defaultKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
-    if (defaultKey) {
-      aiInstance = new GoogleGenAI({ apiKey: defaultKey });
-    } else {
-      aiInstance = null;
-    }
   }
 };
 
@@ -227,87 +207,37 @@ Do not skip any text. Be exhaustive.`;
         return { blocks: [], usage };
       }
 
-      const ai = getAiInstance();
-      const response = await withTimeout((signal) => ai.models.generateContent({
-        model: modelName,
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                data: base64Image,
-                mimeType: mimeType,
-              },
-            },
-            {
-              text: finalPrompt,
-            },
-          ],
-        },
-        config: {
-          systemInstruction: "You are an expert manga/comic translator. Your job is to extract and translate EVERY SINGLE piece of text on the page. Do not miss any text, no matter how small or stylized. Be extremely thorough.",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                box_2d: {
-                  type: Type.ARRAY,
-                  items: { type: Type.INTEGER },
-                  description: "Bounding box [ymin, xmin, ymax, xmax] normalized 0-1000",
-                },
-                originalText: { type: Type.STRING },
-                translatedText: { type: Type.STRING },
-              },
-              required: ["box_2d", "originalText", "translatedText"],
-            },
-          },
-        },
-      }), 30000); // 30 seconds timeout
+      if (modelName !== 'openrouter-custom') {
+        const customApiKey = safeGetItem('custom_gemini_api_key');
+        const response = await withTimeout((signal) => fetch("/api/translate-page", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base64Image,
+            mimeType,
+            sourceLanguage,
+            targetLanguage,
+            customPrompt,
+            modelName,
+            translationMemory,
+            customApiKey
+          }),
+          signal
+        }), 60000); // 60 seconds timeout for full OCR + translation
 
-      let jsonStr = "";
-      try {
-        jsonStr = response.text?.trim() || "[]";
-      } catch (textError) {
-        console.error("[translateMangaPage] Error reading response text:", textError);
-        throw new Error("Failed to read API response. The content might have been blocked by safety filters.");
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data?.error || `HTTP ${response.status}`);
+        }
+
+        let usage = data.usage;
+        if (usage) {
+          usage.estimatedCost = calculateGeminiCost(usage.promptTokens, usage.candidatesTokens, modelName);
+        }
+
+        return { blocks: data.blocks || [], usage };
       }
-      
-      let usage: TokenUsage | undefined;
-      if (response.usageMetadata) {
-        const promptTokens = response.usageMetadata.promptTokenCount || 0;
-        const candidatesTokens = response.usageMetadata.candidatesTokenCount || 0;
-        const totalTokens = response.usageMetadata.totalTokenCount || 0;
-        const estimatedCost = calculateGeminiCost(promptTokens, candidatesTokens, modelName);
-        usage = {
-          promptTokens,
-          candidatesTokens,
-          totalTokens,
-          estimatedCost
-        };
-      }
-      
-      console.log("[translateMangaPage] Raw API response received:", jsonStr.substring(0, 150) + "...");
-      
-      // Extract JSON array using regex to handle markdown formatting
-      const match = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
-      if (match) {
-        jsonStr = match[0];
-      } else {
-        // Fallback cleanup
-        jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
-      }
-      
-      let blocks: TranslationBlock[] = [];
-      try {
-        blocks = JSON.parse(jsonStr) as TranslationBlock[];
-        console.log(`[translateMangaPage] Successfully parsed ${blocks.length} translation blocks.`);
-      } catch (parseError) {
-        console.error("[translateMangaPage] Failed to parse JSON:", jsonStr);
-        throw new Error("Invalid response format from API. Could not parse translation data.");
-      }
-      
-      return { blocks, usage };
     } catch (e: any) {
       console.error("[translateMangaPage] Gemini API Error:", e);
       const errorMessage = e.message || String(e);
