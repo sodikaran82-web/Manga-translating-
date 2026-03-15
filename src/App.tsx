@@ -8,12 +8,12 @@ import { ImageUploader } from './components/ImageUploader';
 import { TranslationOverlay } from './components/TranslationOverlay';
 import { HistoryModal } from './components/HistoryModal';
 import { SettingsModal } from './components/SettingsModal';
-import { translateMangaPage, TranslationBlock, TokenUsage } from './utils/geminiService';
+import { translateMangaPage, translateImage, translateBatch, TranslationBlock, TokenUsage } from './utils/geminiService';
 import { saveToHistory, HistoryItem } from './utils/historyService';
 import { getTranslationMemory, saveToTranslationMemory, saveMultipleToTranslationMemory, clearTranslationMemory } from './utils/translationMemoryService';
 import { translationQueue } from './utils/requestQueue';
 import { safeGetItem, safeSetItem } from './utils/storage';
-import { compressImage } from './utils/imageCompressor';
+import { resizeImage, fileToBase64 } from './utils/imageUtils';
 import { Loader2, RefreshCw, Languages, AlertCircle, ArrowRight, Download, ChevronLeft, ChevronRight, Trash2, Clock, Archive, Play, Database, Settings, Square, Info } from 'lucide-react';
 import JSZip from 'jszip';
 import { jsPDF } from 'jspdf';
@@ -34,8 +34,12 @@ export default function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
-  const [batchMode, setBatchMode] = useState<'sequential' | 'parallel'>('sequential');
-  const [batchSize, setBatchSize] = useState<number>(2);
+  const [batchMode, setBatchMode] = useState<'sequential' | 'parallel'>(() => {
+    return (safeGetItem('manga_batch_mode') as 'sequential' | 'parallel') || 'sequential';
+  });
+  const [batchSize, setBatchSize] = useState<number>(() => {
+    return parseInt(safeGetItem('manga_batch_size') || '2');
+  });
   const [isBatchTranslating, setIsBatchTranslating] = useState(false);
   const stopBatchRef = useRef(false);
   const [showConfirmClearMemory, setShowConfirmClearMemory] = useState(false);
@@ -56,12 +60,16 @@ export default function App() {
     return safeGetItem('manga_custom_prompt') || '';
   });
 
-  // Save languages and prompt to localStorage when they change
+  // Save settings to localStorage when they change
   useEffect(() => {
     safeSetItem('manga_source_lang', sourceLang);
     safeSetItem('manga_target_lang', targetLang);
     safeSetItem('manga_custom_prompt', customPrompt);
-  }, [sourceLang, targetLang, customPrompt]);
+    safeSetItem('manga_selected_model', selectedModel);
+    safeSetItem('manga_auto_download', String(autoDownload));
+    safeSetItem('manga_batch_mode', batchMode);
+    safeSetItem('manga_batch_size', String(batchSize));
+  }, [sourceLang, targetLang, customPrompt, selectedModel, autoDownload, batchMode, batchSize]);
 
   // Re-translate all if languages or prompt change
   useEffect(() => {
@@ -91,53 +99,57 @@ export default function App() {
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'translating', error: undefined } : i));
 
     try {
-      let base64String = '';
+      let base64Data = '';
+      let mimeType = 'image/jpeg';
+
       if (item.file) {
-        base64String = await compressImage(item.file);
+        const resizedBlob = await resizeImage(item.file);
+        if (!resizedBlob) throw new Error("Failed to resize image.");
+        base64Data = await fileToBase64(resizedBlob);
       } else if (item.imageUrl.startsWith('data:image')) {
-        base64String = item.imageUrl;
+        const matches = item.imageUrl.match(/^data:(.+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          mimeType = matches[1];
+          base64Data = matches[2];
+        } else {
+          throw new Error("Invalid image data.");
+        }
       } else {
         throw new Error("No image data available.");
       }
 
-      const matches = base64String.match(/^data:(.+);base64,(.+)$/);
-      if (matches && matches.length === 3) {
-        const mimeType = matches[1];
-        const base64Data = matches[2];
+      const imageHash = `${item.id}_${sourceLang}_${targetLang}`;
+      const memory = await getTranslationMemory(sourceLang, targetLang);
+      
+      // Limit to 50 most recent entries to save tokens and avoid quota limits
+      const recentMemoryEntries = Object.values(memory)
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 50);
         
-        const memory = await getTranslationMemory(sourceLang, targetLang);
-        // Limit to 50 most recent entries to save tokens and avoid quota limits
-        const recentMemoryEntries = Object.values(memory)
-          .sort((a, b) => b.timestamp - a.timestamp)
-          .slice(0, 50);
-          
-        const memoryDict = Object.fromEntries(
-          recentMemoryEntries.map(entry => [entry.originalText, entry.translatedText])
-        );
+      const memoryDict = Object.fromEntries(
+        recentMemoryEntries.map(entry => [entry.originalText, entry.translatedText])
+      );
 
-        // Add the request to the global queue to enforce rate limits
-        const result = await translationQueue.add(() => 
-          translateMangaPage(base64Data, mimeType, sourceLang, targetLang, customPrompt, memoryDict, selectedModel)
-        );
-        
-        // Save new translations to memory
-        await saveMultipleToTranslationMemory(sourceLang, targetLang, result.blocks);
+      // Add the request to the global queue to enforce rate limits
+      const result = await translationQueue.add(() => 
+        translateImage(imageHash, base64Data, mimeType, sourceLang, targetLang, customPrompt, memoryDict, selectedModel)
+      );
+      
+      // Save new translations to memory
+      await saveMultipleToTranslationMemory(sourceLang, targetLang, result.blocks);
 
-        setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'done', blocks: result.blocks, usage: result.usage } : i));
-        
-        // Save to history
-        saveToHistory({
-          id: item.id,
-          timestamp: Date.now(),
-          imageUrl: base64String,
-          sourceLang,
-          targetLang,
-          blocks: result.blocks,
-          usage: result.usage
-        });
-      } else {
-        throw new Error("Failed to read image data.");
-      }
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'done', blocks: result.blocks, usage: result.usage } : i));
+      
+      // Save to history
+      saveToHistory({
+        id: item.id,
+        timestamp: Date.now(),
+        imageUrl: `data:${mimeType};base64,${base64Data}`,
+        sourceLang,
+        targetLang,
+        blocks: result.blocks,
+        usage: result.usage
+      });
     } catch (err) {
       console.error("[translateItem] Error:", err);
       const errorMessage = err instanceof Error ? err.message : "An error occurred during translation.";
@@ -214,7 +226,7 @@ export default function App() {
     });
   };
 
-  const handleEditBlock = async (indexToEdit: number, newText: string) => {
+  const handleEditBlock = async (indexToEdit: number, newText: string, newFontSize?: number) => {
     setItems(prev => {
       const next = [...prev];
       const currentItem = next[currentIndex];
@@ -223,6 +235,7 @@ export default function App() {
         const block = newBlocks[indexToEdit];
         if (block) {
           block.translatedText = newText;
+          block.fontSize = newFontSize;
           // Save the edited translation to memory
           saveToTranslationMemory(sourceLang, targetLang, block.originalText, newText).catch(console.error);
         }
@@ -311,22 +324,20 @@ export default function App() {
       let estimatedOriginalFontSize = Math.sqrt(textArea / (1.2 * originalCharCount));
       estimatedOriginalFontSize = Math.max(12, Math.min(estimatedOriginalFontSize * 1.2, h / 1.5));
       
-      let fontSize = Math.floor(estimatedOriginalFontSize);
+      let fontSize = block.fontSize || Math.floor(estimatedOriginalFontSize);
       const minFontSize = 8;
       let lineHeight = 0;
       
-      while (fontSize >= minFontSize) {
+      // If manual font size is set, we don't binary search/scale down, we just use it
+      if (block.fontSize) {
         ctx.font = `bold ${fontSize}px "Comic Neue", Kalam, sans-serif`;
         lineHeight = fontSize * 1.1;
-        
         const words = block.translatedText.trim().split(/\s+/);
         let line = '';
         lines = [];
-        
         for (let n = 0; n < words.length; n++) {
           const testLine = line + (line ? ' ' : '') + words[n];
           const metrics = ctx.measureText(testLine);
-          
           if (metrics.width > w - paddingX * 2 && n > 0) {
             lines.push(line);
             line = words[n];
@@ -335,19 +346,41 @@ export default function App() {
           }
         }
         if (line) lines.push(line);
-        
-        const totalHeight = lines.length * lineHeight;
-        
-        let maxLineWidth = 0;
-        lines.forEach(l => {
-            maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
-        });
+      } else {
+        while (fontSize >= minFontSize) {
+          ctx.font = `bold ${fontSize}px "Comic Neue", Kalam, sans-serif`;
+          lineHeight = fontSize * 1.1;
+          
+          const words = block.translatedText.trim().split(/\s+/);
+          let line = '';
+          lines = [];
+          
+          for (let n = 0; n < words.length; n++) {
+            const testLine = line + (line ? ' ' : '') + words[n];
+            const metrics = ctx.measureText(testLine);
+            
+            if (metrics.width > w - paddingX * 2 && n > 0) {
+              lines.push(line);
+              line = words[n];
+            } else {
+              line = testLine;
+            }
+          }
+          if (line) lines.push(line);
+          
+          const totalHeight = lines.length * lineHeight;
+          
+          let maxLineWidth = 0;
+          lines.forEach(l => {
+              maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
+          });
 
-        if ((totalHeight <= h - paddingY * 2 && maxLineWidth <= w - paddingX * 2) || fontSize === minFontSize) {
-          break;
+          if ((totalHeight <= h - paddingY * 2 && maxLineWidth <= w - paddingX * 2) || fontSize === minFontSize) {
+            break;
+          }
+          
+          fontSize -= 1;
         }
-        
-        fontSize -= 1;
       }
 
       ctx.save();
@@ -532,12 +565,10 @@ export default function App() {
         selectedModel={selectedModel}
         onModelChange={(model) => {
           setSelectedModel(model);
-          safeSetItem('manga_selected_model', model);
         }}
         autoDownload={autoDownload}
         onAutoDownloadChange={(val) => {
           setAutoDownload(val);
-          safeSetItem('manga_auto_download', String(val));
         }}
       />
 

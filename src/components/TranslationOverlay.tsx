@@ -1,23 +1,27 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { TranslationBlock } from '../utils/geminiService';
-import { X } from 'lucide-react';
+import { X, Sliders } from 'lucide-react';
 
 interface TranslationOverlayProps {
   imageUrl: string;
   blocks: TranslationBlock[];
   onDeleteBlock?: (index: number) => void;
-  onEditBlock?: (index: number, newText: string) => void;
+  onEditBlock?: (index: number, newText: string, newFontSize?: number) => void;
 }
 
-function AutoText({ text, originalText, isSelected }: { text: string, originalText: string, isSelected: boolean }) {
+function AutoText({ text, originalText, isSelected, manualFontSize }: { text: string, originalText: string, isSelected: boolean, manualFontSize?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLParagraphElement>(null);
-  const [fontSize, setFontSize] = useState(14);
+  const [fontSize, setFontSize] = useState(manualFontSize || 14);
 
   useEffect(() => {
     if (isSelected) {
-      setFontSize(16); // Fixed size when selected
-      if (textRef.current) textRef.current.style.fontSize = '16px';
+      setFontSize(manualFontSize || 16);
+      return;
+    }
+
+    if (manualFontSize) {
+      setFontSize(manualFontSize);
       return;
     }
     
@@ -25,24 +29,17 @@ function AutoText({ text, originalText, isSelected }: { text: string, originalTe
     const textEl = textRef.current;
     if (!container || !textEl) return;
 
-    let min = 6;
+    // Reset for measurement
+    textEl.style.fontSize = '12px';
     
-    // Estimate original font size based on container area and original text length
-    const paddingX = 12; // 6px padding on all sides
-    const paddingY = 12;
-    const availableHeight = container.clientHeight - paddingY;
-    const availableWidth = container.clientWidth - paddingX;
+    const padding = 6; // Slightly more padding for better look
+    const availableHeight = container.clientHeight - padding;
+    const availableWidth = container.clientWidth - padding;
     
-    const textArea = Math.max(0, availableWidth) * Math.max(0, availableHeight);
-    const originalCharCount = Math.max(1, originalText.replace(/\s/g, '').length);
-    
-    // For CJK characters, area ≈ charCount * (fontSize * 1.2 * fontSize)
-    let estimatedOriginalFontSize = Math.sqrt(textArea / (1.2 * originalCharCount));
-    
-    // Constrain it to reasonable bounds and add a small buffer (1.2x) for estimation errors
-    estimatedOriginalFontSize = Math.max(12, Math.min(estimatedOriginalFontSize * 1.2, container.clientHeight / 1.5));
-    
-    let max = Math.floor(estimatedOriginalFontSize);
+    if (availableHeight <= 0 || availableWidth <= 0) return;
+
+    let min = 4;
+    let max = 80; // Increased max for large bubbles
     let best = min;
 
     // Binary search for best font size
@@ -50,7 +47,12 @@ function AutoText({ text, originalText, isSelected }: { text: string, originalTe
       const mid = Math.floor((min + max) / 2);
       textEl.style.fontSize = `${mid}px`;
       
-      if (textEl.scrollHeight <= availableHeight && textEl.scrollWidth <= availableWidth) {
+      // For measurement, we want to see if it fits within the width with wrapping
+      // We also account for line-height by checking scrollHeight
+      const isHeightOk = textEl.scrollHeight <= availableHeight;
+      const isWidthOk = textEl.scrollWidth <= availableWidth;
+
+      if (isHeightOk && isWidthOk) {
         best = mid;
         min = mid + 1;
       } else {
@@ -59,21 +61,26 @@ function AutoText({ text, originalText, isSelected }: { text: string, originalTe
     }
     
     setFontSize(best);
-    textEl.style.fontSize = `${best}px`;
-  }, [text, originalText, isSelected]);
+  }, [text, originalText, isSelected, manualFontSize, containerRef.current?.clientWidth, containerRef.current?.clientHeight]);
 
   return (
-    <div ref={containerRef} className={`w-full h-full flex flex-col items-center justify-center ${isSelected ? 'overflow-y-auto max-h-[250px] scrollbar-thin p-2' : 'overflow-hidden p-1.5'}`}>
+    <div 
+      ref={containerRef} 
+      className={`w-full h-full flex items-center justify-center ${isSelected ? 'overflow-y-auto max-h-[250px] scrollbar-thin p-2' : 'overflow-hidden p-0.5'}`}
+    >
       <p 
         ref={textRef} 
-        className={`font-comic text-black text-center font-bold ${isSelected ? 'leading-snug' : 'leading-[1.1]'}`} 
+        className="font-comic text-black text-center font-bold leading-[1.15] m-0 p-0" 
         style={{ 
           wordBreak: 'break-word',
           overflowWrap: 'anywhere',
-          hyphens: 'auto',
           fontSize: `${fontSize}px`,
           width: '100%',
-          margin: 0
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          minHeight: '100%'
         }}
       >
         {text}
@@ -85,6 +92,7 @@ function AutoText({ text, originalText, isSelected }: { text: string, originalTe
 export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBlock }: TranslationOverlayProps) {
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
   const [editingText, setEditingText] = useState<string>('');
+  const [editingFontSize, setEditingFontSize] = useState<number | undefined>(undefined);
 
   // Re-run scaling when window resizes
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
@@ -94,12 +102,13 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const handleSelectBlock = (index: number, currentText: string) => {
+  const handleSelectBlock = (index: number, block: TranslationBlock) => {
     if (selectedBlock === index) {
       setSelectedBlock(null);
     } else {
       setSelectedBlock(index);
-      setEditingText(currentText);
+      setEditingText(block.translatedText);
+      setEditingFontSize(block.fontSize);
     }
   };
 
@@ -107,9 +116,14 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
     setEditingText(e.target.value);
   };
 
+  const handleFontSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseInt(e.target.value);
+    setEditingFontSize(val === 0 ? undefined : val);
+  };
+
   const handleSaveEdit = (index: number) => {
-    if (onEditBlock && editingText.trim() !== blocks[index].translatedText) {
-      onEditBlock(index, editingText.trim());
+    if (onEditBlock) {
+      onEditBlock(index, editingText.trim(), editingFontSize);
     }
     setSelectedBlock(null);
   };
@@ -119,7 +133,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
       <img src={imageUrl} alt="Manga page" className="w-full h-auto block" />
       
       {blocks.map((block, index) => {
-        const expand = 2; // Expand bounding box by 0.2% to cover artifacts
+        const expand = 5; // Expand bounding box by 0.5% to cover artifacts and improve centering
         const ymin = Math.max(0, block.box_2d[0] - expand);
         const xmin = Math.max(0, block.box_2d[1] - expand);
         const ymax = Math.min(1000, block.box_2d[2] + expand);
@@ -134,11 +148,11 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
 
         return (
           <div
-            key={`${index}-${windowWidth}`} // Force re-render on resize for AutoText
-            className={`absolute transition-all duration-200 ease-in-out flex flex-col items-center justify-center ${
+            key={`${index}-${windowWidth}`}
+            className={`absolute transition-all duration-200 ease-in-out flex flex-col items-center justify-center group ${
               isSelected 
-                ? 'bg-white z-50 shadow-2xl rounded p-3 sm:p-4 border-2 border-indigo-600' 
-                : 'bg-white z-10 rounded hover:ring-2 hover:ring-indigo-400 cursor-pointer'
+                ? 'bg-white z-50 shadow-2xl rounded-md p-3 sm:p-4 border-2 border-indigo-600' 
+                : 'bg-white/95 z-10 rounded-sm hover:ring-2 hover:ring-indigo-400 cursor-pointer shadow-sm'
             }`}
             style={{ 
               top, 
@@ -147,12 +161,11 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
               height: isSelected ? 'auto' : height,
               minWidth: isSelected ? width : undefined,
               minHeight: isSelected ? height : undefined,
-              maxWidth: isSelected ? '280px' : undefined,
-              boxShadow: isSelected ? undefined : 'none',
+              maxWidth: isSelected ? '320px' : undefined,
             }}
             onClick={(e) => {
               if (!isSelected) {
-                handleSelectBlock(index, block.translatedText);
+                handleSelectBlock(index, block);
               }
             }}
           >
@@ -178,6 +191,26 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
                   className="w-full p-2 border border-gray-300 rounded text-sm mb-2 resize-y min-h-[80px] focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   autoFocus
                 />
+                
+                <div className="flex flex-col space-y-1 mb-3">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[10px] font-bold uppercase text-gray-500">Font Size</label>
+                    <span className="text-[10px] font-mono bg-gray-100 px-1 rounded">
+                      {editingFontSize || 'Auto'}
+                    </span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="0" 
+                    max="40" 
+                    step="1"
+                    value={editingFontSize || 0}
+                    onChange={handleFontSizeChange}
+                    className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                  <p className="text-[9px] text-gray-400 italic">Set to 0 for auto-scaling</p>
+                </div>
+
                 <div className="flex justify-end space-x-2">
                   <button
                     onClick={() => setSelectedBlock(null)}
@@ -194,7 +227,14 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
                 </div>
               </div>
             ) : (
-              <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} />
+              <>
+                <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} manualFontSize={block.fontSize} />
+                {block.fontSize && (
+                  <div className="absolute -top-1 -left-1 bg-indigo-600 text-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity z-20" title={`Manual Font Size: ${block.fontSize}px`}>
+                    <Sliders className="w-2.5 h-2.5" />
+                  </div>
+                )}
+              </>
             )}
           </div>
         );
