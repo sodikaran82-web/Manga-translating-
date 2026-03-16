@@ -19,13 +19,16 @@ interface SettingsModalProps {
   onAutoDownloadChange: (autoDownload: boolean) => void;
   notificationsEnabled: boolean;
   onNotificationsEnabledChange: (enabled: boolean) => void;
+  temperature: number;
+  onTemperatureChange: (temp: number) => void;
 }
 
-export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, autoDownload, onAutoDownloadChange, notificationsEnabled, onNotificationsEnabledChange }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, autoDownload, onAutoDownloadChange, notificationsEnabled, onNotificationsEnabledChange, temperature, onTemperatureChange }: SettingsModalProps) {
   const [apiKey, setApiKey] = useState('');
   const [localModel, setLocalModel] = useState(selectedModel);
   const [localAutoDownload, setLocalAutoDownload] = useState(autoDownload);
   const [localNotificationsEnabled, setLocalNotificationsEnabled] = useState(notificationsEnabled);
+  const [localTemperature, setLocalTemperature] = useState(temperature);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -34,9 +37,10 @@ export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, a
       setLocalModel(selectedModel);
       setLocalAutoDownload(autoDownload);
       setLocalNotificationsEnabled(notificationsEnabled);
+      setLocalTemperature(temperature);
       setSaved(false);
     }
-  }, [isOpen, selectedModel, autoDownload, notificationsEnabled]);
+  }, [isOpen, selectedModel, autoDownload, notificationsEnabled, temperature]);
 
   if (!isOpen) return null;
 
@@ -45,6 +49,7 @@ export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, a
     onModelChange(localModel);
     onAutoDownloadChange(localAutoDownload);
     onNotificationsEnabledChange(localNotificationsEnabled);
+    onTemperatureChange(localTemperature);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -94,6 +99,32 @@ export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, a
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="pt-4 border-t border-gray-100">
+              <label htmlFor="temperatureSlider" className="block text-sm font-medium text-gray-700 mb-1 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Cpu className="w-4 h-4 text-indigo-500" />
+                  <span>Temperature: {localTemperature.toFixed(1)}</span>
+                </div>
+              </label>
+              <p className="text-xs text-gray-500 mb-3">
+                Control the creativity and randomness of the generated translations. Lower values result in more predictable output, while higher values encourage more diverse translations.
+              </p>
+              <input
+                id="temperatureSlider"
+                type="range"
+                min="0"
+                max="2"
+                step="0.1"
+                value={localTemperature}
+                onChange={(e) => setLocalTemperature(parseFloat(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+              />
+              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                <span>0.0</span>
+                <span>2.0</span>
+              </div>
             </div>
 
             <div className="pt-4 border-t border-gray-100">

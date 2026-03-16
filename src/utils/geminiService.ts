@@ -85,7 +85,8 @@ export async function translateMangaPage(
   targetLanguage: string,
   customPrompt?: string,
   translationMemory?: Record<string, any>,
-  modelName: string = "gemini-3-flash-preview"
+  modelName: string = "gemini-flash-latest",
+  temperature: number = 0.2
 ): Promise<TranslationResult> {
   const apiKey = getCustomApiKey() || (process.env.GEMINI_API_KEY as string);
   
@@ -94,7 +95,7 @@ export async function translateMangaPage(
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  const model = modelName || "gemini-3-flash-preview";
+  const model = modelName || "gemini-flash-latest";
 
   let retries = 3;
   let delay = 4000;
@@ -141,6 +142,7 @@ Return ONLY a valid JSON array of objects. Be extremely thorough.`;
           ]
         },
         config: {
+          temperature,
           systemInstruction: "You are an expert manga/comic translator. Your job is to extract EVERY SINGLE piece of text on the page and translate it. Do not miss any text, no matter how small or stylized. Be extremely thorough.",
           responseMimeType: "application/json",
           responseSchema: {
@@ -244,8 +246,9 @@ export async function translateImage(
   targetLanguage: string = "English",
   customPrompt?: string,
   translationMemory?: Record<string, any>,
-  modelName: string = "gemini-3-flash-preview",
-  force: boolean = false
+  modelName: string = "gemini-flash-latest",
+  force: boolean = false,
+  temperature: number = 0.2
 ) {
   if (!force) {
     const cached = getCachedTranslation(imageHash);
@@ -255,14 +258,14 @@ export async function translateImage(
     }
   }
 
-  const result = await translateMangaPage(base64Image, mimeType, sourceLanguage, targetLanguage, customPrompt, translationMemory, modelName);
+  const result = await translateMangaPage(base64Image, mimeType, sourceLanguage, targetLanguage, customPrompt, translationMemory, modelName, temperature);
 
   setCachedTranslation(imageHash, result);
 
   return result;
 }
 
-export async function translateBatch(images: { base64: string, mimeType: string }[], modelName: string = "gemini-3-flash-preview") {
+export async function translateBatch(images: { base64: string, mimeType: string }[], modelName: string = "gemini-flash-latest", temperature: number = 0.2) {
   const apiKey = getCustomApiKey() || (process.env.GEMINI_API_KEY as string);
   const ai = new GoogleGenAI({ apiKey });
 
@@ -283,7 +286,7 @@ ${images.map((_, i) => `Image ${i + 1}`).join("\n")}
       ]
     },
     config: {
-      temperature: 0.2,
+      temperature,
       maxOutputTokens: 400,
       responseMimeType: "application/json"
     }

@@ -52,7 +52,10 @@ export default function App() {
     return safeGetItem('manga_target_lang') || 'Hindi';
   });
   const [selectedModel, setSelectedModel] = useState(() => {
-    return safeGetItem('manga_selected_model') || 'gemini-3-flash-preview';
+    return safeGetItem('manga_selected_model') || 'gemini-flash-latest';
+  });
+  const [temperature, setTemperature] = useState(() => {
+    return parseFloat(safeGetItem('manga_temperature') || '0.2');
   });
   const [autoDownload, setAutoDownload] = useState(() => {
     return safeGetItem('manga_auto_download') === 'true';
@@ -73,12 +76,13 @@ export default function App() {
     safeSetItem('manga_target_lang', targetLang);
     safeSetItem('manga_custom_prompt', customPrompt);
     safeSetItem('manga_selected_model', selectedModel);
+    safeSetItem('manga_temperature', String(temperature));
     safeSetItem('manga_auto_download', String(autoDownload));
     safeSetItem('manga_batch_mode', batchMode);
     safeSetItem('manga_batch_size', String(batchSize));
     safeSetItem('manga_font_family', fontFamily);
     safeSetItem('manga_notifications_enabled', String(notificationsEnabled));
-  }, [sourceLang, targetLang, customPrompt, selectedModel, autoDownload, batchMode, batchSize, fontFamily, notificationsEnabled]);
+  }, [sourceLang, targetLang, customPrompt, selectedModel, temperature, autoDownload, batchMode, batchSize, fontFamily, notificationsEnabled]);
 
   const notify = {
     success: (msg: string, options?: any) => notificationsEnabled && toast.success(msg, options),
@@ -88,12 +92,12 @@ export default function App() {
     dismiss: (id?: string | number) => toast.dismiss(id),
   };
 
-  // Re-translate all if languages or prompt change
+  // Re-translate all if languages, prompt, or temperature change
   useEffect(() => {
     if (items.length > 0) {
       setItems(prev => prev.map(item => ({ ...item, status: 'pending', blocks: undefined, error: undefined })));
     }
-  }, [sourceLang, targetLang, customPrompt]);
+  }, [sourceLang, targetLang, customPrompt, temperature]);
 
   const handleImagesSelected = (selectedFiles: File[]) => {
     const newItems: TranslationItem[] = selectedFiles.map(file => ({
@@ -137,12 +141,12 @@ export default function App() {
         throw new Error("No image data available.");
       }
 
-      const imageHash = `${item.id}_${sourceLang}_${targetLang}_${selectedModel}_${customPrompt}`;
+      const imageHash = `${item.id}_${sourceLang}_${targetLang}_${selectedModel}_${customPrompt}_${temperature}`;
       const memory = await getTranslationMemory(sourceLang, targetLang);
 
       // Add the request to the global queue to enforce rate limits
       const result = await translationQueue.add(() => 
-        translateImage(imageHash, base64Data, mimeType, sourceLang, targetLang, customPrompt, memory as any, selectedModel, true)
+        translateImage(imageHash, base64Data, mimeType, sourceLang, targetLang, customPrompt, memory as any, selectedModel, true, temperature)
       );
       
       // Save new translations to memory
@@ -597,6 +601,10 @@ export default function App() {
         notificationsEnabled={notificationsEnabled}
         onNotificationsEnabledChange={(val) => {
           setNotificationsEnabled(val);
+        }}
+        temperature={temperature}
+        onTemperatureChange={(val) => {
+          setTemperature(val);
         }}
       />
 
