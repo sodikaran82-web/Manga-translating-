@@ -101,117 +101,8 @@ export async function translateMangaPage(
 
   while (retries > 0) {
     try {
-      console.log(`[translateMangaPage] Starting translation request. Retries left: ${retries}`);
+      console.log(`[translateMangaPage] Starting single-pass translation request. Retries left: ${retries}`);
       
-      // Gemini Logic (Frontend)
-      console.log("[translateMangaPage] Starting OCR...");
-      const ocrPrompt = `Analyze this manga/comic page carefully. You must find and extract EVERY SINGLE piece of text on the page. 
-
-Specific Instructions for Manga:
-1. **Japanese Text**: Accurately extract all Kanji, Hiragana, and Katakana. Pay close attention to vertical text (top-to-bottom) which is common in manga.
-2. **Sound Effects (SFX)**: Extract stylized sound effects (e.g., "ゴゴゴ", "ドキドキ"). Even if they are integrated into the art, try to capture them.
-3. **Font Styles**: Handle various font styles, including standard bubble text, handwritten side-comments, bold emphasis, and narration boxes.
-4. **Exhaustive Search**: Do not skip small text, background signs, or character thought bubbles.
-
-For EACH piece of text found:
-1. Extract the original text (which is in ${sourceLanguage}).
-2. Provide its bounding box as [ymin, xmin, ymax, xmax] where coordinates are normalized between 0 and 1000.
-
-Example Format:
-{
-  "box_2d": [100, 200, 150, 300],
-  "originalText": "こんにちは"
-}
-
-Return ONLY a valid JSON array of objects. Be extremely thorough.`;
-
-      const ocrResponse = await ai.models.generateContent({
-        model,
-        contents: {
-          parts: [
-            { inlineData: { data: base64Image, mimeType } },
-            { text: ocrPrompt }
-          ]
-        },
-        config: {
-          systemInstruction: "You are an expert manga/comic OCR system. Your job is to extract EVERY SINGLE piece of text on the page. Do not miss any text, no matter how small or stylized. Be extremely thorough.",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                box_2d: {
-                  type: Type.ARRAY,
-                  items: { type: Type.INTEGER },
-                  description: "Bounding box [ymin, xmin, ymax, xmax] normalized 0-1000",
-                },
-                originalText: { type: Type.STRING },
-              },
-              required: ["box_2d", "originalText"],
-            },
-          },
-        }
-      });
-
-      let ocrJsonStr = ocrResponse.text?.trim() || "[]";
-      const match = ocrJsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
-      if (match) ocrJsonStr = match[0];
-      else ocrJsonStr = ocrJsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
-
-      let extractedBubbles: { box_2d: number[], originalText: string }[] = [];
-      try {
-        extractedBubbles = JSON.parse(ocrJsonStr);
-      } catch (e) {
-        console.error("[translateMangaPage] Failed to parse OCR JSON:", ocrJsonStr);
-        throw new Error("Invalid response format from OCR.");
-      }
-
-      console.log(`[translateMangaPage] OCR found ${extractedBubbles.length} bubbles.`);
-
-      if (extractedBubbles.length === 0) {
-        return { blocks: [], usage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 } };
-      }
-
-      // STEP 2: Translate Chunks
-      const finalTranslations = new Array(extractedBubbles.length).fill("");
-      let totalPromptTokens = ocrResponse.usageMetadata?.promptTokenCount || 0;
-      let totalCandidatesTokens = ocrResponse.usageMetadata?.candidatesTokenCount || 0;
-
-      // Group identical texts to avoid translating the same text multiple times in one page
-      const uniqueTextsMap = new Map<string, number[]>();
-      
-      for (let i = 0; i < extractedBubbles.length; i++) {
-        const originalText = extractedBubbles[i].originalText;
-        const text = normalizeText(originalText);
-        
-        // 1. Check translation memory (previous batches)
-        const memoryEntry = translationMemory ? (translationMemory[originalText] || translationMemory[text]) : null;
-        if (memoryEntry) {
-          finalTranslations[i] = typeof memoryEntry === 'string' 
-            ? memoryEntry 
-            : memoryEntry.translatedText;
-          continue;
-        }
-        
-        // 2. Check local cache for this specific single string
-        const singleKey = getCacheKey(targetLanguage, [text]);
-        const cachedSingle = getCached(singleKey);
-        if (cachedSingle && cachedSingle.length > 0 && cachedSingle[0].translation) {
-          finalTranslations[i] = cachedSingle[0].translation;
-          continue;
-        }
-
-        // 3. Group for batch translation
-        if (!uniqueTextsMap.has(text)) {
-          uniqueTextsMap.set(text, []);
-        }
-        uniqueTextsMap.get(text)!.push(i);
-      }
-
-      const itemsToTranslate = Array.from(uniqueTextsMap.entries()).map(([text, indices]) => ({ text, indices }));
-      const chunks = chunkArray(itemsToTranslate, MAX_CHUNK_SIZE);
-
       let memoryString = "";
       if (translationMemory && Object.keys(translationMemory).length > 0) {
         // Limit to 50 most recent entries for the prompt to save tokens
@@ -224,103 +115,70 @@ Return ONLY a valid JSON array of objects. Be extremely thorough.`;
           .join('\n');
       }
 
-      for (const chunk of chunks) {
-        const chunkTexts = chunk.map(item => item.text);
-        const key = getCacheKey(targetLanguage, chunkTexts);
+      const ocrPrompt = `Analyze this manga/comic page carefully. You must find and extract EVERY SINGLE piece of text on the page, AND translate it into ${targetLanguage}.
 
-        let translatedChunk = getCached(key);
+Specific Instructions for Manga:
+1. **Extraction**: Accurately extract all text (${sourceLanguage}). Pay close attention to vertical text (top-to-bottom) which is common in manga.
+2. **Translation**: Translate the extracted text into natural, conversational ${targetLanguage}. If the text is ALREADY in ${targetLanguage}, keep it as is.
+3. **Sound Effects (SFX)**: Extract and translate stylized sound effects (e.g., "ゴゴゴ", "ドキドキ"). Even if they are integrated into the art, try to capture them.
+4. **Exhaustive Search**: Do not skip small text, background signs, or character thought bubbles.
+${customPrompt ? `5. **Additional Instructions**: ${customPrompt}` : ""}
+${memoryString ? `\nTranslation Memory (Use these previously translated segments for consistency):\n${memoryString}` : ""}
 
-        if (!translatedChunk) {
-          console.log(`[translateMangaPage] Translating chunk of ${chunk.length} unique bubbles...`);
-          const translatePrompt = [
-            `Translate the following manga speech bubbles from ${sourceLanguage} into natural ${targetLanguage}.`,
-            "Keep the translations short, natural, and conversational for manga speech bubbles.",
-            customPrompt ? `Additional Instructions: ${customPrompt}` : "",
-            memoryString ? `\nTranslation Memory (Use these previously translated segments for consistency):\n${memoryString}` : "",
-            "Return ONLY valid JSON that matches the schema.",
-            "",
-            "Bubbles:",
-            ...chunkTexts.map((text, index) => `${index}: ${text}`)
-          ].join("\n");
+For EACH piece of text found, provide:
+1. "box_2d": Its bounding box as [ymin, xmin, ymax, xmax] where coordinates are normalized between 0 and 1000.
+2. "originalText": The original text in ${sourceLanguage}.
+3. "translatedText": The translation in ${targetLanguage}.
 
-          const chunkResponse = await ai.models.generateContent({
-            model,
-            contents: translatePrompt,
-            config: {
-              temperature: 0.2,
-              maxOutputTokens: 800,
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    index: { type: Type.INTEGER },
-                    translation: { type: Type.STRING },
-                  },
-                  required: ["index", "translation"],
+Return ONLY a valid JSON array of objects. Be extremely thorough.`;
+
+      const response = await ai.models.generateContent({
+        model,
+        contents: {
+          parts: [
+            { inlineData: { data: base64Image, mimeType } },
+            { text: ocrPrompt }
+          ]
+        },
+        config: {
+          systemInstruction: "You are an expert manga/comic translator. Your job is to extract EVERY SINGLE piece of text on the page and translate it. Do not miss any text, no matter how small or stylized. Be extremely thorough.",
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                box_2d: {
+                  type: Type.ARRAY,
+                  items: { type: Type.INTEGER },
+                  description: "Bounding box [ymin, xmin, ymax, xmax] normalized 0-1000",
                 },
+                originalText: { type: Type.STRING },
+                translatedText: { type: Type.STRING },
               },
-            }
-          });
-
-          totalPromptTokens += chunkResponse.usageMetadata?.promptTokenCount || 0;
-          totalCandidatesTokens += chunkResponse.usageMetadata?.candidatesTokenCount || 0;
-
-          let jsonStr = chunkResponse.text?.trim() || "[]";
-          const tMatch = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
-          if (tMatch) jsonStr = tMatch[0];
-          else jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
-
-          try {
-            translatedChunk = JSON.parse(jsonStr);
-            setCached(key, translatedChunk);
-            
-            // Also cache individual translations to avoid re-translating them later
-            for (const item of translatedChunk) {
-              if (item && typeof item.index === 'number' && item.translation) {
-                const singleText = chunkTexts[item.index];
-                if (singleText) {
-                  const singleKey = getCacheKey(targetLanguage, [singleText]);
-                  setCached(singleKey, [{ index: 0, translation: item.translation }]);
-                  
-                  // Update in-memory dict so subsequent chunks in this same page can use it
-                  if (translationMemory) {
-                    translationMemory[singleText] = {
-                      originalText: singleText,
-                      translatedText: item.translation,
-                      timestamp: Date.now()
-                    };
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            console.error("[translateMangaPage] Failed to parse translation JSON:", jsonStr);
-            translatedChunk = [];
-          }
-        } else {
-          console.log(`[translateMangaPage] Using cached translation for chunk of ${chunk.length} bubbles.`);
+              required: ["box_2d", "originalText", "translatedText"],
+            },
+          },
         }
+      });
 
-        for (const item of translatedChunk) {
-          if (item && typeof item.index === 'number') {
-            const originalIndices = chunk[item.index]?.indices;
-            if (originalIndices) {
-              for (const idx of originalIndices) {
-                finalTranslations[idx] = String(item.translation || "");
-              }
-            }
-          }
-        }
+      let jsonStr = response.text?.trim() || "[]";
+      const match = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
+      if (match) jsonStr = match[0];
+      else jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
+
+      let extractedBlocks: TranslationBlock[] = [];
+      try {
+        extractedBlocks = JSON.parse(jsonStr);
+      } catch (e) {
+        console.error("[translateMangaPage] Failed to parse JSON:", jsonStr);
+        throw new Error("Invalid response format from Gemini.");
       }
 
-      // STEP 3: Merge
-      const blocks = extractedBubbles.map((b, i) => ({
-        box_2d: b.box_2d as [number, number, number, number],
-        originalText: b.originalText,
-        translatedText: finalTranslations[i] || b.originalText
-      }));
+      console.log(`[translateMangaPage] Found and translated ${extractedBlocks.length} bubbles.`);
+
+      const totalPromptTokens = response.usageMetadata?.promptTokenCount || 0;
+      const totalCandidatesTokens = response.usageMetadata?.candidatesTokenCount || 0;
 
       const usage = {
         promptTokens: totalPromptTokens,
@@ -329,7 +187,25 @@ Return ONLY a valid JSON array of objects. Be extremely thorough.`;
         estimatedCost: calculateGeminiCost(totalPromptTokens, totalCandidatesTokens, model)
       };
 
-      return { blocks, usage };
+      // Cache individual translations to memory for future pages
+      if (translationMemory && extractedBlocks.length > 0) {
+        for (const block of extractedBlocks) {
+          if (block.originalText && block.translatedText) {
+            const text = normalizeText(block.originalText);
+            translationMemory[text] = {
+              originalText: text,
+              translatedText: block.translatedText,
+              timestamp: Date.now()
+            };
+            
+            // Also save to local cache
+            const singleKey = getCacheKey(targetLanguage, [text]);
+            setCached(singleKey, [{ index: 0, translation: block.translatedText }]);
+          }
+        }
+      }
+
+      return { blocks: extractedBlocks, usage };
 
     } catch (e: any) {
       console.error("[translateMangaPage] Gemini API Error:", e);
@@ -368,12 +244,15 @@ export async function translateImage(
   targetLanguage: string = "English",
   customPrompt?: string,
   translationMemory?: Record<string, any>,
-  modelName: string = "gemini-3-flash-preview"
+  modelName: string = "gemini-3-flash-preview",
+  force: boolean = false
 ) {
-  const cached = getCachedTranslation(imageHash);
-  if (cached) {
-    console.log("Using cached translation");
-    return cached;
+  if (!force) {
+    const cached = getCachedTranslation(imageHash);
+    if (cached) {
+      console.log("Using cached translation");
+      return cached;
+    }
   }
 
   const result = await translateMangaPage(base64Image, mimeType, sourceLanguage, targetLanguage, customPrompt, translationMemory, modelName);

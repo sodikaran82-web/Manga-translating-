@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Key, Save, Trash2, Cpu, Download } from 'lucide-react';
+import { X, Key, Save, Trash2, Cpu, Download, Bell } from 'lucide-react';
 import { getCustomApiKey, setCustomApiKey } from '../utils/geminiService';
 
 export const AVAILABLE_MODELS = [
@@ -17,12 +17,15 @@ interface SettingsModalProps {
   onModelChange: (model: string) => void;
   autoDownload: boolean;
   onAutoDownloadChange: (autoDownload: boolean) => void;
+  notificationsEnabled: boolean;
+  onNotificationsEnabledChange: (enabled: boolean) => void;
 }
 
-export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, autoDownload, onAutoDownloadChange }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, autoDownload, onAutoDownloadChange, notificationsEnabled, onNotificationsEnabledChange }: SettingsModalProps) {
   const [apiKey, setApiKey] = useState('');
   const [localModel, setLocalModel] = useState(selectedModel);
   const [localAutoDownload, setLocalAutoDownload] = useState(autoDownload);
+  const [localNotificationsEnabled, setLocalNotificationsEnabled] = useState(notificationsEnabled);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -30,9 +33,10 @@ export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, a
       setApiKey(getCustomApiKey() || '');
       setLocalModel(selectedModel);
       setLocalAutoDownload(autoDownload);
+      setLocalNotificationsEnabled(notificationsEnabled);
       setSaved(false);
     }
-  }, [isOpen, selectedModel, autoDownload]);
+  }, [isOpen, selectedModel, autoDownload, notificationsEnabled]);
 
   if (!isOpen) return null;
 
@@ -40,6 +44,7 @@ export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, a
     setCustomApiKey(apiKey.trim() || null);
     onModelChange(localModel);
     onAutoDownloadChange(localAutoDownload);
+    onNotificationsEnabledChange(localNotificationsEnabled);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -106,6 +111,26 @@ export function SettingsModal({ isOpen, onClose, selectedModel, onModelChange, a
                   </span>
                   <span className="text-xs text-gray-500">
                     Automatically download the PDF when batch translation completes.
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            <div className="pt-4 border-t border-gray-100">
+              <label className="flex items-center space-x-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localNotificationsEnabled}
+                  onChange={(e) => setLocalNotificationsEnabled(e.target.checked)}
+                  className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                />
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-gray-700 flex items-center space-x-2">
+                    <Bell className="w-4 h-4 text-indigo-500" />
+                    <span>Enable Notifications</span>
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    Show toast messages for translation status and errors.
                   </span>
                 </div>
               </label>

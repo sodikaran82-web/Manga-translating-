@@ -29,6 +29,11 @@ export async function saveToTranslationMemory(
 ): Promise<void> {
   if (!originalText.trim() || !translatedText.trim()) return;
 
+  // Do not save to memory if the translation is identical to the original text
+  if (originalText.trim().toLowerCase() === translatedText.trim().toLowerCase()) {
+    return;
+  }
+
   try {
     const key = `${MEMORY_KEY_PREFIX}${sourceLang}_${targetLang}`;
     const memory = await getTranslationMemory(sourceLang, targetLang);
@@ -69,6 +74,13 @@ export async function saveMultipleToTranslationMemory(
     let added = false;
     for (const block of blocks) {
       if (!block.originalText.trim() || !block.translatedText.trim()) continue;
+      
+      // Do not save to memory if the translation is identical to the original text
+      // This prevents failed translations from being permanently cached
+      if (block.originalText.trim().toLowerCase() === block.translatedText.trim().toLowerCase()) {
+        continue;
+      }
+
       memory[block.originalText] = {
         originalText: block.originalText,
         translatedText: block.translatedText,

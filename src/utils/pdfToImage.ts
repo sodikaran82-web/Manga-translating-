@@ -1,15 +1,17 @@
 import { getDocument, GlobalWorkerOptions, version } from 'pdfjs-dist';
 
-// Use Vite's worker import to ensure the worker is bundled correctly
 // @ts-ignore
-import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker';
-GlobalWorkerOptions.workerPort = new PdfWorker();
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export async function convertPdfToImages(file: File): Promise<File[]> {
   const arrayBuffer = await file.arrayBuffer();
   const uint8Array = new Uint8Array(arrayBuffer);
   const pdf = await getDocument({ 
     data: uint8Array,
+    cMapUrl: `https://unpkg.com/pdfjs-dist@${version}/cmaps/`,
+    cMapPacked: true,
+    standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${version}/standard_fonts/`,
   }).promise;
   
   const numPages = pdf.numPages;
@@ -33,10 +35,15 @@ export async function convertPdfToImages(file: File): Promise<File[]> {
     canvas.height = viewport.height;
     canvas.width = viewport.width;
     
+    // Fill with white background to prevent transparent areas becoming black in JPEG
+    context.fillStyle = 'white';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    
     // Render PDF page into canvas context
     const renderContext: any = {
       canvasContext: context,
       viewport: viewport,
+      background: 'white'
     };
     
     await page.render(renderContext).promise;

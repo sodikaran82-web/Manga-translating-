@@ -8,12 +8,14 @@ export function resizeImage(file: File): Promise<Blob | null> {
   return new Promise(resolve => {
     img.onload = () => {
       const MAX = 1200;
-      const scale = Math.min(MAX / img.width, MAX / img.height);
+      const scale = Math.min(1, Math.min(MAX / img.width, MAX / img.height));
 
       canvas.width = img.width * scale;
       canvas.height = img.height * scale;
 
       if (ctx) {
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       }
 

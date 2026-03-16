@@ -63,6 +63,9 @@ export default function App() {
   const [fontFamily, setFontFamily] = useState(() => {
     return safeGetItem('manga_font_family') || '"Comic Neue", Kalam, sans-serif';
   });
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
+    return safeGetItem('manga_notifications_enabled') !== 'false';
+  });
 
   // Save settings to localStorage when they change
   useEffect(() => {
@@ -74,7 +77,16 @@ export default function App() {
     safeSetItem('manga_batch_mode', batchMode);
     safeSetItem('manga_batch_size', String(batchSize));
     safeSetItem('manga_font_family', fontFamily);
-  }, [sourceLang, targetLang, customPrompt, selectedModel, autoDownload, batchMode, batchSize, fontFamily]);
+    safeSetItem('manga_notifications_enabled', String(notificationsEnabled));
+  }, [sourceLang, targetLang, customPrompt, selectedModel, autoDownload, batchMode, batchSize, fontFamily, notificationsEnabled]);
+
+  const notify = {
+    success: (msg: string, options?: any) => notificationsEnabled && toast.success(msg, options),
+    error: (msg: string, options?: any) => notificationsEnabled && toast.error(msg, options),
+    info: (msg: string, options?: any) => notificationsEnabled && toast.info(msg, options),
+    loading: (msg: string, options?: any) => notificationsEnabled && toast.loading(msg, options),
+    dismiss: (id?: string | number) => toast.dismiss(id),
+  };
 
   // Re-translate all if languages or prompt change
   useEffect(() => {
@@ -95,7 +107,7 @@ export default function App() {
     if (items.length === 0) {
       setCurrentIndex(0);
     }
-    toast.success(`${selectedFiles.length} images added to queue`);
+    notify.success(`${selectedFiles.length} images added to queue`);
   };
 
   const translateItem = async (index: number, currentItem?: TranslationItem): Promise<void> => {
@@ -105,7 +117,7 @@ export default function App() {
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'translating', error: undefined } : i));
 
     try {
-      toast.loading(`Translating page ${index + 1}...`, { id: item.id });
+      notify.loading(`Translating page ${index + 1}...`, { id: item.id });
       let base64Data = '';
       let mimeType = 'image/jpeg';
 
@@ -125,19 +137,19 @@ export default function App() {
         throw new Error("No image data available.");
       }
 
-      const imageHash = `${item.id}_${sourceLang}_${targetLang}`;
+      const imageHash = `${item.id}_${sourceLang}_${targetLang}_${selectedModel}_${customPrompt}`;
       const memory = await getTranslationMemory(sourceLang, targetLang);
 
       // Add the request to the global queue to enforce rate limits
       const result = await translationQueue.add(() => 
-        translateImage(imageHash, base64Data, mimeType, sourceLang, targetLang, customPrompt, memory as any, selectedModel)
+        translateImage(imageHash, base64Data, mimeType, sourceLang, targetLang, customPrompt, memory as any, selectedModel, true)
       );
       
       // Save new translations to memory
       await saveMultipleToTranslationMemory(sourceLang, targetLang, result.blocks);
 
       setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'done', blocks: result.blocks, usage: result.usage } : i));
-      toast.success(`Page ${index + 1} translated!`, { id: item.id });
+      notify.success(`Page ${index + 1} translated!`, { id: item.id });
       
       // Save to history
       saveToHistory({
@@ -153,7 +165,7 @@ export default function App() {
       console.error("[translateItem] Error:", err);
       const errorMessage = err instanceof Error ? err.message : "An error occurred during translation.";
       setItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'error', error: errorMessage } : i));
-      toast.error(`Failed to translate page ${index + 1}`, { 
+      notify.error(`Failed to translate page ${index + 1}`, { 
         id: item.id,
         description: errorMessage 
       });
@@ -200,7 +212,7 @@ export default function App() {
     stopBatchRef.current = true;
     translationQueue.clear(); // Clear any pending requests in the queue
     setIsBatchTranslating(false);
-    toast.info("Batch translation stopped");
+    notify.info("Batch translation stopped");
   };
 
   const handleReset = () => {
@@ -495,7 +507,7 @@ export default function App() {
   const handleClearMemory = async () => {
     await clearTranslationMemory(sourceLang, targetLang);
     setShowConfirmClearMemory(false);
-    toast.success("Translation memory cleared");
+    notify.success("Translation memory cleared");
   };
 
   const currentItem = items[currentIndex];
@@ -581,6 +593,10 @@ export default function App() {
         autoDownload={autoDownload}
         onAutoDownloadChange={(val) => {
           setAutoDownload(val);
+        }}
+        notificationsEnabled={notificationsEnabled}
+        onNotificationsEnabledChange={(val) => {
+          setNotificationsEnabled(val);
         }}
       />
 
