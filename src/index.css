@@ -1,9 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&family=Kalam:wght@700&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&family=Kalam:wght@700&family=Inter:wght@400;500;600;700&family=Noto+Sans:wght@400;700&family=Bad+Comic&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-comic: "Comic Neue", "Kalam", cursive, sans-serif;
+  --font-noto: "Noto Sans", sans-serif;
+  --font-badcomic: "Bad Comic", cursive, sans-serif;
+  --font-wildwords: "WildWords", "CC Wild Words", "Comic Sans MS", cursive, sans-serif;
 }
 
 @layer utilities {

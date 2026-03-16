@@ -7,9 +7,10 @@ interface TranslationOverlayProps {
   blocks: TranslationBlock[];
   onDeleteBlock?: (index: number) => void;
   onEditBlock?: (index: number, newText: string, newFontSize?: number) => void;
+  fontFamily?: string;
 }
 
-function AutoText({ text, originalText, isSelected, manualFontSize }: { text: string, originalText: string, isSelected: boolean, manualFontSize?: number }) {
+function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }: { text: string, originalText: string, isSelected: boolean, manualFontSize?: number, fontFamily?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLParagraphElement>(null);
   const [fontSize, setFontSize] = useState(manualFontSize || 14);
@@ -38,7 +39,7 @@ function AutoText({ text, originalText, isSelected, manualFontSize }: { text: st
     
     if (availableHeight <= 0 || availableWidth <= 0) return;
 
-    let min = 4;
+    let min = 8;
     let max = 80; // Increased max for large bubbles
     let best = min;
 
@@ -70,17 +71,13 @@ function AutoText({ text, originalText, isSelected, manualFontSize }: { text: st
     >
       <p 
         ref={textRef} 
-        className="font-comic text-black text-center font-bold leading-[1.15] m-0 p-0" 
+        className="text-black text-center font-bold leading-[1.15] m-0 p-0" 
         style={{ 
           wordBreak: 'break-word',
           overflowWrap: 'anywhere',
           fontSize: `${fontSize}px`,
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          textAlign: 'center',
-          minHeight: '100%'
+          fontFamily: fontFamily || '"Comic Neue", Kalam, sans-serif',
+          width: '100%'
         }}
       >
         {text}
@@ -89,7 +86,7 @@ function AutoText({ text, originalText, isSelected, manualFontSize }: { text: st
   );
 }
 
-export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBlock }: TranslationOverlayProps) {
+export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBlock, fontFamily }: TranslationOverlayProps) {
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
   const [editingText, setEditingText] = useState<string>('');
   const [editingFontSize, setEditingFontSize] = useState<number | undefined>(undefined);
@@ -228,7 +225,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
               </div>
             ) : (
               <>
-                <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} manualFontSize={block.fontSize} />
+                <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} manualFontSize={block.fontSize} fontFamily={fontFamily} />
                 {block.fontSize && (
                   <div className="absolute -top-1 -left-1 bg-indigo-600 text-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity z-20" title={`Manual Font Size: ${block.fontSize}px`}>
                     <Sliders className="w-2.5 h-2.5" />

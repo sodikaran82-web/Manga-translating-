@@ -60,6 +60,9 @@ export default function App() {
   const [customPrompt, setCustomPrompt] = useState(() => {
     return safeGetItem('manga_custom_prompt') || '';
   });
+  const [fontFamily, setFontFamily] = useState(() => {
+    return safeGetItem('manga_font_family') || '"Comic Neue", Kalam, sans-serif';
+  });
 
   // Save settings to localStorage when they change
   useEffect(() => {
@@ -70,7 +73,8 @@ export default function App() {
     safeSetItem('manga_auto_download', String(autoDownload));
     safeSetItem('manga_batch_mode', batchMode);
     safeSetItem('manga_batch_size', String(batchSize));
-  }, [sourceLang, targetLang, customPrompt, selectedModel, autoDownload, batchMode, batchSize]);
+    safeSetItem('manga_font_family', fontFamily);
+  }, [sourceLang, targetLang, customPrompt, selectedModel, autoDownload, batchMode, batchSize, fontFamily]);
 
   // Re-translate all if languages or prompt change
   useEffect(() => {
@@ -123,19 +127,10 @@ export default function App() {
 
       const imageHash = `${item.id}_${sourceLang}_${targetLang}`;
       const memory = await getTranslationMemory(sourceLang, targetLang);
-      
-      // Limit to 50 most recent entries to save tokens and avoid quota limits
-      const recentMemoryEntries = Object.values(memory)
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, 50);
-        
-      const memoryDict = Object.fromEntries(
-        recentMemoryEntries.map(entry => [entry.originalText, entry.translatedText])
-      );
 
       // Add the request to the global queue to enforce rate limits
       const result = await translationQueue.add(() => 
-        translateImage(imageHash, base64Data, mimeType, sourceLang, targetLang, customPrompt, memoryDict, selectedModel)
+        translateImage(imageHash, base64Data, mimeType, sourceLang, targetLang, customPrompt, memory as any, selectedModel)
       );
       
       // Save new translations to memory
@@ -305,42 +300,21 @@ export default function App() {
 
       // Draw rounded rectangle
       const radius = 4;
-      ctx.beginPath();
-      ctx.moveTo(x + radius, y);
-      ctx.lineTo(x + w - radius, y);
-      ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-      ctx.lineTo(x + w, y + h - radius);
-      ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-      ctx.lineTo(x + radius, y + h);
-      ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-      ctx.lineTo(x, y + radius);
-      ctx.quadraticCurveTo(x, y, x + radius, y);
-      ctx.closePath();
-      
-      ctx.fillStyle = 'white';
-      ctx.fill();
-
-      ctx.fillStyle = 'black';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
       
       let lines: string[] = [];
-      const paddingX = Math.min(12, w * 0.1);
-      const paddingY = Math.min(12, h * 0.1);
+      const paddingX = Math.min(6, w * 0.05);
+      const paddingY = Math.min(6, h * 0.05);
       
-      const textArea = Math.max(0, w - paddingX * 2) * Math.max(0, h - paddingY * 2);
-      const originalCharCount = Math.max(1, block.originalText.replace(/\s/g, '').length);
-      let estimatedOriginalFontSize = Math.sqrt(textArea / (1.2 * originalCharCount));
-      estimatedOriginalFontSize = Math.max(12, Math.min(estimatedOriginalFontSize * 1.2, h / 1.5));
-      
-      let fontSize = block.fontSize || Math.floor(estimatedOriginalFontSize);
+      let fontSize = block.fontSize || Math.floor(Math.min(80, h * 0.8));
       const minFontSize = 8;
       let lineHeight = 0;
+      let finalW = w;
+      let finalH = h;
       
       // If manual font size is set, we don't binary search/scale down, we just use it
       if (block.fontSize) {
-        ctx.font = `bold ${fontSize}px "Comic Neue", Kalam, sans-serif`;
-        lineHeight = fontSize * 1.1;
+        ctx.font = `bold ${fontSize}px ${fontFamily}`;
+        lineHeight = fontSize * 1.05;
         const words = block.translatedText.trim().split(/\s+/);
         let line = '';
         lines = [];
@@ -355,10 +329,19 @@ export default function App() {
           }
         }
         if (line) lines.push(line);
+        
+        // Expand box if text is larger
+        const totalHeight = lines.length * lineHeight;
+        let maxLineWidth = 0;
+        lines.forEach(l => {
+            maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
+        });
+        finalW = Math.max(w, maxLineWidth + paddingX * 2);
+        finalH = Math.max(h, totalHeight + paddingY * 2);
       } else {
         while (fontSize >= minFontSize) {
-          ctx.font = `bold ${fontSize}px "Comic Neue", Kalam, sans-serif`;
-          lineHeight = fontSize * 1.1;
+          ctx.font = `bold ${fontSize}px ${fontFamily}`;
+          lineHeight = fontSize * 1.05;
           
           const words = block.translatedText.trim().split(/\s+/);
           let line = '';
@@ -385,6 +368,11 @@ export default function App() {
           });
 
           if ((totalHeight <= h - paddingY * 2 && maxLineWidth <= w - paddingX * 2) || fontSize === minFontSize) {
+            // If we reached minFontSize, expand the box to fit the text
+            if (fontSize === minFontSize) {
+              finalW = Math.max(w, maxLineWidth + paddingX * 2);
+              finalH = Math.max(h, totalHeight + paddingY * 2);
+            }
             break;
           }
           
@@ -392,24 +380,37 @@ export default function App() {
         }
       }
 
+      // Center the expanded box around the original center
+      const centerX = x + w / 2;
+      const centerY = y + h / 2;
+      const drawX = centerX - finalW / 2;
+      const drawY = centerY - finalH / 2;
+
       ctx.save();
       ctx.beginPath();
-      ctx.moveTo(x + radius, y);
-      ctx.lineTo(x + w - radius, y);
-      ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-      ctx.lineTo(x + w, y + h - radius);
-      ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-      ctx.lineTo(x + radius, y + h);
-      ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-      ctx.lineTo(x, y + radius);
-      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.moveTo(drawX + radius, drawY);
+      ctx.lineTo(drawX + finalW - radius, drawY);
+      ctx.quadraticCurveTo(drawX + finalW, drawY, drawX + finalW, drawY + radius);
+      ctx.lineTo(drawX + finalW, drawY + finalH - radius);
+      ctx.quadraticCurveTo(drawX + finalW, drawY + finalH, drawX + finalW - radius, drawY + finalH);
+      ctx.lineTo(drawX + radius, drawY + finalH);
+      ctx.quadraticCurveTo(drawX, drawY + finalH, drawX, drawY + finalH - radius);
+      ctx.lineTo(drawX, drawY + radius);
+      ctx.quadraticCurveTo(drawX, drawY, drawX + radius, drawY);
       ctx.closePath();
+      
+      ctx.fillStyle = 'white';
+      ctx.fill();
       ctx.clip();
 
-      const startY = y + h / 2 - ((lines.length - 1) * lineHeight) / 2;
+      ctx.fillStyle = 'black';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      const startY = drawY + finalH / 2 - ((lines.length - 1) * lineHeight) / 2;
       
       lines.forEach((lineText, i) => {
-        ctx.fillText(lineText.trim(), x + w / 2, startY + i * lineHeight);
+        ctx.fillText(lineText.trim(), drawX + finalW / 2, startY + i * lineHeight);
       });
       
       ctx.restore();
@@ -636,6 +637,20 @@ export default function App() {
                 <option value="English">English</option>
               </select>
             </div>
+            
+            <div className="flex flex-col w-full sm:w-auto">
+              <label className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wider">Font Style</label>
+              <select 
+                value={fontFamily}
+                onChange={(e) => setFontFamily(e.target.value)}
+                className="bg-gray-50 border border-gray-200 text-gray-900 text-base sm:text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-3 sm:p-2.5 min-h-[44px]"
+              >
+                <option value='"Comic Neue", Kalam, sans-serif'>Comic (Default)</option>
+                <option value='"Noto Sans", sans-serif'>Noto Sans</option>
+                <option value='"WildWords", "CC Wild Words", "Comic Sans MS", sans-serif'>WildWords</option>
+                <option value='"Bad Comic", cursive, sans-serif'>BadComic</option>
+              </select>
+            </div>
           </div>
           
           <div className="flex flex-col w-full">
@@ -660,16 +675,35 @@ export default function App() {
         ) : (
           <div className="space-y-6 flex flex-col items-center">
             {/* Pagination / Navigation */}
-            <div className="w-full flex items-center justify-between bg-white p-3 rounded-2xl shadow-sm border border-gray-200">
-              <button
-                onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
-                disabled={currentIndex === 0}
-                className="p-3 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
-              >
-                <ChevronLeft className="w-6 h-6 text-gray-700" />
-              </button>
+            <div className="w-full flex flex-wrap items-center justify-between bg-white p-3 rounded-2xl shadow-sm border border-gray-200 gap-3">
+              <div className="flex items-center justify-between w-full sm:w-auto order-1 sm:order-none">
+                <button
+                  onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
+                  disabled={currentIndex === 0}
+                  className="p-3 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                >
+                  <ChevronLeft className="w-6 h-6 text-gray-700" />
+                </button>
+                
+                <div className="flex flex-col items-center sm:hidden px-4">
+                  <span className="text-sm font-medium text-gray-900">
+                    Page {currentIndex + 1} of {items.length}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {items.filter(i => i.status === 'done').length} translated
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setCurrentIndex(prev => Math.min(items.length - 1, prev + 1))}
+                  disabled={currentIndex === items.length - 1}
+                  className="p-3 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                >
+                  <ChevronRight className="w-6 h-6 text-gray-700" />
+                </button>
+              </div>
               
-              <div className="flex flex-col items-center">
+              <div className="hidden sm:flex flex-col items-center order-2 sm:order-none">
                 <span className="text-sm font-medium text-gray-900">
                   Page {currentIndex + 1} of {items.length}
                 </span>
@@ -678,13 +712,13 @@ export default function App() {
                 </span>
               </div>
 
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center justify-center space-x-2 w-full sm:w-auto order-3 sm:order-none">
                 {items.some(item => item.status === 'pending' || item.status === 'error') && (
-                  <div className="flex items-center space-x-2 mr-2">
+                  <div className="flex flex-wrap justify-center items-center gap-2">
                     <select
                       value={batchMode}
                       onChange={(e) => setBatchMode(e.target.value as 'sequential' | 'parallel')}
-                      className="text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 py-2 pl-3 pr-8"
+                      className="text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 py-2 pl-3 pr-8 min-h-[44px]"
                       title="Batch Mode"
                       disabled={isBatchTranslating}
                     >
@@ -698,7 +732,7 @@ export default function App() {
                         max="10"
                         value={batchSize}
                         onChange={(e) => setBatchSize(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
-                        className="w-16 text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 py-2 px-2"
+                        className="w-16 text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 py-2 px-2 min-h-[44px]"
                         title="Batch Size (1-10)"
                         disabled={isBatchTranslating}
                       />
@@ -706,33 +740,27 @@ export default function App() {
                     {isBatchTranslating ? (
                       <button
                         onClick={handleStopBatch}
-                        className="flex items-center space-x-1 px-4 py-2 bg-red-100 text-red-700 hover:bg-red-200 rounded-full text-sm font-medium transition-colors min-h-[44px]"
+                        className="flex items-center justify-center space-x-1 px-4 py-2 bg-red-100 text-red-700 hover:bg-red-200 rounded-full text-sm font-medium transition-colors min-h-[44px] w-full sm:w-auto"
                         title="Stop batch translation"
                       >
                         <Square className="w-4 h-4 fill-current" />
-                        <span className="hidden sm:inline">Stop</span>
+                        <span>Stop</span>
                       </button>
                     ) : (
                       <button
                         onClick={handleTranslateAll}
-                        className="flex items-center space-x-1 px-4 py-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded-full text-sm font-medium transition-colors min-h-[44px]"
+                        className="flex items-center justify-center space-x-1 px-4 py-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded-full text-sm font-medium transition-colors min-h-[44px] w-full sm:w-auto"
                         title="Translate all pending pages"
                       >
                         <Play className="w-4 h-4" />
-                        <span className="hidden sm:inline">Translate All</span>
+                        <span>Translate All</span>
                       </button>
                     )}
                   </div>
                 )}
-                <button
-                  onClick={() => setCurrentIndex(prev => Math.min(items.length - 1, prev + 1))}
-                  disabled={currentIndex === items.length - 1}
-                  className="p-3 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
-                >
-                  <ChevronRight className="w-6 h-6 text-gray-700" />
-                </button>
               </div>
             </div>
+
 
             {/* Current Item Display */}
             {currentItem && (
@@ -804,7 +832,7 @@ export default function App() {
 
                 {currentItem.status === 'done' && currentItem.blocks && (
                   <div className="w-full space-y-6">
-                    <TranslationOverlay imageUrl={currentItem.imageUrl} blocks={currentItem.blocks} onDeleteBlock={handleDeleteBlock} onEditBlock={handleEditBlock} />
+                    <TranslationOverlay imageUrl={currentItem.imageUrl} blocks={currentItem.blocks} onDeleteBlock={handleDeleteBlock} onEditBlock={handleEditBlock} fontFamily={fontFamily} />
                     
                     {currentItem.usage && (
                       <div className="flex items-center justify-center text-sm text-gray-500 space-x-6 bg-white py-3 px-6 rounded-full shadow-sm border border-gray-100 w-max mx-auto">

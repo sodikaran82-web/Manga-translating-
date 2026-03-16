@@ -84,7 +84,7 @@ export async function translateMangaPage(
   sourceLanguage: string,
   targetLanguage: string,
   customPrompt?: string,
-  translationMemory?: Record<string, string>,
+  translationMemory?: Record<string, any>,
   modelName: string = "gemini-3-flash-preview"
 ): Promise<TranslationResult> {
   const apiKey = getCustomApiKey() || (process.env.GEMINI_API_KEY as string);
@@ -174,19 +174,53 @@ Return ONLY a valid JSON array of objects. Be extremely thorough.`;
       }
 
       // STEP 2: Translate Chunks
-      const chunks = chunkArray(
-        extractedBubbles.map((b, index) => ({ text: b.originalText, index })),
-        MAX_CHUNK_SIZE
-      );
-
       const finalTranslations = new Array(extractedBubbles.length).fill("");
       let totalPromptTokens = ocrResponse.usageMetadata?.promptTokenCount || 0;
       let totalCandidatesTokens = ocrResponse.usageMetadata?.candidatesTokenCount || 0;
 
+      // Group identical texts to avoid translating the same text multiple times in one page
+      const uniqueTextsMap = new Map<string, number[]>();
+      
+      for (let i = 0; i < extractedBubbles.length; i++) {
+        const originalText = extractedBubbles[i].originalText;
+        const text = normalizeText(originalText);
+        
+        // 1. Check translation memory (previous batches)
+        const memoryEntry = translationMemory ? (translationMemory[originalText] || translationMemory[text]) : null;
+        if (memoryEntry) {
+          finalTranslations[i] = typeof memoryEntry === 'string' 
+            ? memoryEntry 
+            : memoryEntry.translatedText;
+          continue;
+        }
+        
+        // 2. Check local cache for this specific single string
+        const singleKey = getCacheKey(targetLanguage, [text]);
+        const cachedSingle = getCached(singleKey);
+        if (cachedSingle && cachedSingle.length > 0 && cachedSingle[0].translation) {
+          finalTranslations[i] = cachedSingle[0].translation;
+          continue;
+        }
+
+        // 3. Group for batch translation
+        if (!uniqueTextsMap.has(text)) {
+          uniqueTextsMap.set(text, []);
+        }
+        uniqueTextsMap.get(text)!.push(i);
+      }
+
+      const itemsToTranslate = Array.from(uniqueTextsMap.entries()).map(([text, indices]) => ({ text, indices }));
+      const chunks = chunkArray(itemsToTranslate, MAX_CHUNK_SIZE);
+
       let memoryString = "";
       if (translationMemory && Object.keys(translationMemory).length > 0) {
-        memoryString = Object.entries(translationMemory)
-          .map(([orig, trans]) => `"${orig}" -> "${trans}"`)
+        // Limit to 50 most recent entries for the prompt to save tokens
+        const recentMemoryEntries = Object.values(translationMemory)
+          .sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0))
+          .slice(0, 50);
+          
+        memoryString = recentMemoryEntries
+          .map((entry: any) => `"${entry.originalText || entry}" -> "${entry.translatedText || entry}"`)
           .join('\n');
       }
 
@@ -197,16 +231,16 @@ Return ONLY a valid JSON array of objects. Be extremely thorough.`;
         let translatedChunk = getCached(key);
 
         if (!translatedChunk) {
-          console.log(`[translateMangaPage] Translating chunk of ${chunk.length} bubbles...`);
+          console.log(`[translateMangaPage] Translating chunk of ${chunk.length} unique bubbles...`);
           const translatePrompt = [
             `Translate the following manga speech bubbles from ${sourceLanguage} into natural ${targetLanguage}.`,
-            "Keep the tone short, conversational, and faithful to the original meaning.",
+            "Keep the translations short, natural, and conversational for manga speech bubbles.",
             customPrompt ? `Additional Instructions: ${customPrompt}` : "",
             memoryString ? `\nTranslation Memory (Use these previously translated segments for consistency):\n${memoryString}` : "",
             "Return ONLY valid JSON that matches the schema.",
             "",
             "Bubbles:",
-            ...chunkTexts.map((text, index) => `${index}: ${normalizeText(text)}`)
+            ...chunkTexts.map((text, index) => `${index}: ${text}`)
           ].join("\n");
 
           const chunkResponse = await ai.models.generateContent({
@@ -214,7 +248,7 @@ Return ONLY a valid JSON array of objects. Be extremely thorough.`;
             contents: translatePrompt,
             config: {
               temperature: 0.2,
-              maxOutputTokens: 400,
+              maxOutputTokens: 800,
               responseMimeType: "application/json",
               responseSchema: {
                 type: Type.ARRAY,
@@ -241,6 +275,26 @@ Return ONLY a valid JSON array of objects. Be extremely thorough.`;
           try {
             translatedChunk = JSON.parse(jsonStr);
             setCached(key, translatedChunk);
+            
+            // Also cache individual translations to avoid re-translating them later
+            for (const item of translatedChunk) {
+              if (item && typeof item.index === 'number' && item.translation) {
+                const singleText = chunkTexts[item.index];
+                if (singleText) {
+                  const singleKey = getCacheKey(targetLanguage, [singleText]);
+                  setCached(singleKey, [{ index: 0, translation: item.translation }]);
+                  
+                  // Update in-memory dict so subsequent chunks in this same page can use it
+                  if (translationMemory) {
+                    translationMemory[singleText] = {
+                      originalText: singleText,
+                      translatedText: item.translation,
+                      timestamp: Date.now()
+                    };
+                  }
+                }
+              }
+            }
           } catch (e) {
             console.error("[translateMangaPage] Failed to parse translation JSON:", jsonStr);
             translatedChunk = [];
@@ -250,9 +304,13 @@ Return ONLY a valid JSON array of objects. Be extremely thorough.`;
         }
 
         for (const item of translatedChunk) {
-          const originalIndex = chunk[item.index]?.index;
-          if (typeof originalIndex === "number") {
-            finalTranslations[originalIndex] = String(item.translation || "");
+          if (item && typeof item.index === 'number') {
+            const originalIndices = chunk[item.index]?.indices;
+            if (originalIndices) {
+              for (const idx of originalIndices) {
+                finalTranslations[idx] = String(item.translation || "");
+              }
+            }
           }
         }
       }
@@ -309,7 +367,7 @@ export async function translateImage(
   sourceLanguage: string = "Japanese",
   targetLanguage: string = "English",
   customPrompt?: string,
-  translationMemory?: Record<string, string>,
+  translationMemory?: Record<string, any>,
   modelName: string = "gemini-3-flash-preview"
 ) {
   const cached = getCachedTranslation(imageHash);
