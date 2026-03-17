@@ -398,22 +398,23 @@ export default function App() {
       const h = ((ymax - ymin) / 1000) * canvas.height;
 
       // Draw rounded rectangle
-      const radius = 4;
+      const radius = 8;
       
       let lines: string[] = [];
-      const paddingX = Math.min(6, w * 0.05);
-      const paddingY = Math.min(6, h * 0.05);
+      const paddingX = Math.min(10, w * 0.1);
+      const paddingY = Math.min(10, h * 0.1);
       
-      let fontSize = block.fontSize || Math.floor(Math.min(80, h * 0.8));
-      const minFontSize = 8;
+      const comicFontFamily = '"Comic Sans MS", "Chalkboard SE", "Comic Neue", sans-serif';
+      let fontSize = block.fontSize || Math.floor(Math.min(120, h * 0.8));
+      const minFontSize = 10;
       let lineHeight = 0;
       let finalW = w;
       let finalH = h;
       
       // If manual font size is set, we don't binary search/scale down, we just use it
       if (block.fontSize) {
-        ctx.font = `bold ${fontSize}px ${fontFamily}`;
-        lineHeight = fontSize * 1.05;
+        ctx.font = `bold ${fontSize}px ${comicFontFamily}`;
+        lineHeight = fontSize * 1.15;
         const words = block.translatedText.trim().split(/\s+/);
         let line = '';
         lines = [];
@@ -438,44 +439,85 @@ export default function App() {
         finalW = Math.max(w, maxLineWidth + paddingX * 2);
         finalH = Math.max(h, totalHeight + paddingY * 2);
       } else {
-        while (fontSize >= minFontSize) {
-          ctx.font = `bold ${fontSize}px ${fontFamily}`;
-          lineHeight = fontSize * 1.05;
+        // Binary search for the best font size
+        let low = minFontSize;
+        let high = Math.floor(Math.min(120, h * 0.8));
+        let bestFontSize = minFontSize;
+        let bestLines: string[] = [];
+        
+        while (low <= high) {
+          const mid = Math.floor((low + high) / 2);
+          ctx.font = `bold ${mid}px ${comicFontFamily}`;
+          const currentLineHeight = mid * 1.15;
           
           const words = block.translatedText.trim().split(/\s+/);
           let line = '';
-          lines = [];
+          let currentLines: string[] = [];
+          
+          // To make text more bubble-shaped, we can slightly reduce the allowed width
+          // based on how many lines we expect, but for simplicity we'll use a fixed width
+          // However, we can try to balance the lines better.
+          const targetWidth = w - paddingX * 2;
           
           for (let n = 0; n < words.length; n++) {
             const testLine = line + (line ? ' ' : '') + words[n];
             const metrics = ctx.measureText(testLine);
             
-            if (metrics.width > w - paddingX * 2 && n > 0) {
-              lines.push(line);
+            if (metrics.width > targetWidth && n > 0) {
+              currentLines.push(line);
               line = words[n];
             } else {
               line = testLine;
             }
           }
-          if (line) lines.push(line);
+          if (line) currentLines.push(line);
           
-          const totalHeight = lines.length * lineHeight;
-          
+          const totalHeight = currentLines.length * currentLineHeight;
           let maxLineWidth = 0;
-          lines.forEach(l => {
+          currentLines.forEach(l => {
               maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
           });
 
-          if ((totalHeight <= h - paddingY * 2 && maxLineWidth <= w - paddingX * 2) || fontSize === minFontSize) {
-            // If we reached minFontSize, expand the box to fit the text
-            if (fontSize === minFontSize) {
-              finalW = Math.max(w, maxLineWidth + paddingX * 2);
-              finalH = Math.max(h, totalHeight + paddingY * 2);
-            }
-            break;
+          if (totalHeight <= h - paddingY * 2 && maxLineWidth <= w - paddingX * 2) {
+            bestFontSize = mid;
+            bestLines = currentLines;
+            low = mid + 1;
+          } else {
+            high = mid - 1;
           }
-          
-          fontSize -= 1;
+        }
+        
+        fontSize = bestFontSize;
+        lines = bestLines;
+        lineHeight = fontSize * 1.15;
+        ctx.font = `bold ${fontSize}px ${comicFontFamily}`;
+        
+        // If even minFontSize doesn't fit, we need to expand the box
+        if (fontSize === minFontSize && lines.length === 0) {
+           // Recalculate with minFontSize
+           ctx.font = `bold ${minFontSize}px ${comicFontFamily}`;
+           lineHeight = minFontSize * 1.15;
+           const words = block.translatedText.trim().split(/\s+/);
+           let line = '';
+           for (let n = 0; n < words.length; n++) {
+             const testLine = line + (line ? ' ' : '') + words[n];
+             const metrics = ctx.measureText(testLine);
+             if (metrics.width > w - paddingX * 2 && n > 0) {
+               lines.push(line);
+               line = words[n];
+             } else {
+               line = testLine;
+             }
+           }
+           if (line) lines.push(line);
+           
+           const totalHeight = lines.length * lineHeight;
+           let maxLineWidth = 0;
+           lines.forEach(l => {
+               maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
+           });
+           finalW = Math.max(w, maxLineWidth + paddingX * 2);
+           finalH = Math.max(h, totalHeight + paddingY * 2);
         }
       }
 
@@ -486,29 +528,52 @@ export default function App() {
       const drawY = centerY - finalH / 2;
 
       ctx.save();
+      
+      // Draw a slightly larger white background to cover original text better
+      // and use an ellipse if the original box is roughly square, otherwise rounded rect
       ctx.beginPath();
-      ctx.moveTo(drawX + radius, drawY);
-      ctx.lineTo(drawX + finalW - radius, drawY);
-      ctx.quadraticCurveTo(drawX + finalW, drawY, drawX + finalW, drawY + radius);
-      ctx.lineTo(drawX + finalW, drawY + finalH - radius);
-      ctx.quadraticCurveTo(drawX + finalW, drawY + finalH, drawX + finalW - radius, drawY + finalH);
-      ctx.lineTo(drawX + radius, drawY + finalH);
-      ctx.quadraticCurveTo(drawX, drawY + finalH, drawX, drawY + finalH - radius);
-      ctx.lineTo(drawX, drawY + radius);
-      ctx.quadraticCurveTo(drawX, drawY, drawX + radius, drawY);
+      const isSquareish = Math.abs(finalW - finalH) < Math.max(finalW, finalH) * 0.3;
+      
+      if (isSquareish) {
+        // Draw ellipse for speech bubbles
+        ctx.ellipse(centerX, centerY, finalW / 2 + paddingX, finalH / 2 + paddingY, 0, 0, 2 * Math.PI);
+      } else {
+        // Draw rounded rect
+        const bgX = drawX - paddingX/2;
+        const bgY = drawY - paddingY/2;
+        const bgW = finalW + paddingX;
+        const bgH = finalH + paddingY;
+        ctx.moveTo(bgX + radius, bgY);
+        ctx.lineTo(bgX + bgW - radius, bgY);
+        ctx.quadraticCurveTo(bgX + bgW, bgY, bgX + bgW, bgY + radius);
+        ctx.lineTo(bgX + bgW, bgY + bgH - radius);
+        ctx.quadraticCurveTo(bgX + bgW, bgY + bgH, bgX + bgW - radius, bgY + bgH);
+        ctx.lineTo(bgX + radius, bgY + bgH);
+        ctx.quadraticCurveTo(bgX, bgY + bgH, bgX, bgY + bgH - radius);
+        ctx.lineTo(bgX, bgY + radius);
+        ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
+      }
       ctx.closePath();
       
       ctx.fillStyle = 'white';
       ctx.fill();
-      ctx.clip();
+      
+      // Optional: add a subtle stroke to blend with the page
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
 
-      ctx.fillStyle = 'black';
+      ctx.fillStyle = '#111111'; // Slightly off-black for better reading
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       const startY = drawY + finalH / 2 - ((lines.length - 1) * lineHeight) / 2;
       
       lines.forEach((lineText, i) => {
+        // Add a white stroke to the text to ensure it's readable even if the background isn't perfect
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 3;
+        ctx.strokeText(lineText.trim(), drawX + finalW / 2, startY + i * lineHeight);
         ctx.fillText(lineText.trim(), drawX + finalW / 2, startY + i * lineHeight);
       });
       
@@ -1110,16 +1175,41 @@ export default function App() {
                   className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" 
                 />
                 <div className="flex-1">
-                  <label htmlFor="applyFontSize" className="block text-sm font-medium text-gray-700 mb-1 cursor-pointer">Apply Font Size (0 for auto)</label>
-                  <input
-                    disabled={!multiEditApplyFontSize}
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={multiEditFontSize}
-                    onChange={(e) => setMultiEditFontSize(parseInt(e.target.value) || 0)}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-sm"
-                  />
+                  <label htmlFor="applyFontSize" className="block text-sm font-medium text-gray-700 mb-2 cursor-pointer">Apply Font Size</label>
+                  <div className="flex items-center space-x-4">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="fontSizeMode"
+                        disabled={!multiEditApplyFontSize}
+                        checked={multiEditFontSize === 0}
+                        onChange={() => setMultiEditFontSize(0)}
+                        className="text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                      />
+                      <span className={`text-sm ${!multiEditApplyFontSize ? 'text-gray-400' : 'text-gray-700'}`}>Auto-size</span>
+                    </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="fontSizeMode"
+                        disabled={!multiEditApplyFontSize}
+                        checked={multiEditFontSize > 0}
+                        onChange={() => setMultiEditFontSize(16)}
+                        className="text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                      />
+                      <span className={`text-sm ${!multiEditApplyFontSize ? 'text-gray-400' : 'text-gray-700'}`}>Custom size:</span>
+                    </label>
+                    <input
+                      disabled={!multiEditApplyFontSize || multiEditFontSize === 0}
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={multiEditFontSize > 0 ? multiEditFontSize : ''}
+                      onChange={(e) => setMultiEditFontSize(parseInt(e.target.value) || 0)}
+                      className="w-20 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-sm"
+                      placeholder="px"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
