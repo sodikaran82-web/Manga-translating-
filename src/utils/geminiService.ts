@@ -20,6 +20,7 @@ export interface TranslationBlock {
   originalText: string;
   translatedText: string;
   fontSize?: number;
+  cached?: boolean;
 }
 
 export interface TokenUsage {

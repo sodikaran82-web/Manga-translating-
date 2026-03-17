@@ -13,7 +13,7 @@ import { translateMangaPage, translateImage, translateBatch, TranslationBlock, T
 import { saveToHistory, HistoryItem } from './utils/historyService';
 import { getTranslationMemory, saveToTranslationMemory, saveMultipleToTranslationMemory, clearTranslationMemory } from './utils/translationMemoryService';
 import { translationQueue } from './utils/requestQueue';
-import { safeGetItem, safeSetItem } from './utils/storage';
+import { safeGetItem, safeSetItem, loadTextCache, saveTextCache } from './utils/storage';
 import { resizeImage, fileToBase64 } from './utils/imageUtils';
 import { Loader2, RefreshCw, Languages, AlertCircle, ArrowRight, Download, ChevronLeft, ChevronRight, Trash2, Clock, Archive, Play, Database, Settings, Square, Info, CheckSquare, Layers, Edit3, Check } from 'lucide-react';
 import JSZip from 'jszip';
@@ -159,6 +159,39 @@ export default function App() {
         translateImage(imageHash, base64Data, mimeType, sourceLang, targetLang, customPrompt, memory as any, selectedModel, true, temperature)
       );
       
+      const textCache = loadTextCache();
+      let cacheUpdated = false;
+
+      result.blocks = result.blocks.map((block: TranslationBlock) => {
+        const original = block.originalText?.trim();
+
+        // 1. Skip if there's no text to work with
+        if (!original) return block;
+
+        // 2. Check if translation exists in cache
+        if (textCache[original]) {
+          return {
+            ...block,
+            translatedText: textCache[original],
+            cached: true
+          };
+        }
+
+        // 3. If NOT in cache, but the block already has a translation (e.g., from an API call)
+        // Save it to the cache for future use
+        if (block.translatedText) {
+          textCache[original] = block.translatedText;
+          cacheUpdated = true;
+        }
+
+        return block;
+      });
+
+      // 4. Only save to localStorage if something actually changed
+      if (cacheUpdated) {
+        saveTextCache(textCache);
+      }
+      
       // Save new translations to memory
       await saveMultipleToTranslationMemory(sourceLang, targetLang, result.blocks);
 
@@ -268,6 +301,13 @@ export default function App() {
           block.fontSize = newFontSize;
           // Save the edited translation to memory
           saveToTranslationMemory(sourceLang, targetLang, block.originalText, newText).catch(console.error);
+          
+          // Also save to textCache
+          const textCache = loadTextCache();
+          if (block.originalText) {
+            textCache[block.originalText.trim()] = newText;
+            saveTextCache(textCache);
+          }
         }
         next[currentIndex] = {
           ...currentItem,
@@ -325,6 +365,9 @@ export default function App() {
 
     setItems(prevItems => {
       const newItems = [...prevItems];
+      const textCache = loadTextCache();
+      let cacheUpdated = false;
+
       for (const { pageIndex, blockIndex } of selectedBlocks) {
         if (newItems[pageIndex] && newItems[pageIndex].blocks && newItems[pageIndex].blocks![blockIndex]) {
           const block = newItems[pageIndex].blocks![blockIndex];
@@ -333,6 +376,12 @@ export default function App() {
             updatedBlock.translatedText = multiEditText;
             // Save to translation memory
             saveToTranslationMemory(sourceLang, targetLang, block.originalText, multiEditText).catch(console.error);
+            
+            // Also save to textCache
+            if (block.originalText) {
+              textCache[block.originalText.trim()] = multiEditText;
+              cacheUpdated = true;
+            }
           }
           if (multiEditApplyFontSize) {
             updatedBlock.fontSize = multiEditFontSize === 0 ? undefined : multiEditFontSize;
@@ -343,6 +392,11 @@ export default function App() {
           newItems[pageIndex] = { ...newItems[pageIndex], blocks: newBlocks };
         }
       }
+      
+      if (cacheUpdated) {
+        saveTextCache(textCache);
+      }
+      
       return newItems;
     });
     setIsMultiEditModalOpen(false);

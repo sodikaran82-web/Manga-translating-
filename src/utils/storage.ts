@@ -21,3 +21,19 @@ export const safeRemoveItem = (key: string): void => {
     // Ignore
   }
 };
+
+export const loadTextCache = (): Record<string, string> => {
+  const cacheStr = safeGetItem('textCache');
+  if (cacheStr) {
+    try {
+      return JSON.parse(cacheStr);
+    } catch (e) {
+      return {};
+    }
+  }
+  return {};
+};
+
+export const saveTextCache = (cache: Record<string, string>): void => {
+  safeSetItem('textCache', JSON.stringify(cache));
+};
