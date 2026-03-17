@@ -15,7 +15,7 @@ import { getTranslationMemory, saveToTranslationMemory, saveMultipleToTranslatio
 import { translationQueue } from './utils/requestQueue';
 import { safeGetItem, safeSetItem } from './utils/storage';
 import { resizeImage, fileToBase64 } from './utils/imageUtils';
-import { Loader2, RefreshCw, Languages, AlertCircle, ArrowRight, Download, ChevronLeft, ChevronRight, Trash2, Clock, Archive, Play, Database, Settings, Square, Info } from 'lucide-react';
+import { Loader2, RefreshCw, Languages, AlertCircle, ArrowRight, Download, ChevronLeft, ChevronRight, Trash2, Clock, Archive, Play, Database, Settings, Square, Info, CheckSquare, Layers, Edit3, Check } from 'lucide-react';
 import JSZip from 'jszip';
 import { jsPDF } from 'jspdf';
 
@@ -45,6 +45,16 @@ export default function App() {
   const stopBatchRef = useRef(false);
   const [showConfirmClearMemory, setShowConfirmClearMemory] = useState(false);
   
+  // Multi-select state
+  const [selectedBlocks, setSelectedBlocks] = useState<{pageIndex: number, blockIndex: number}[]>([]);
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [isMultiEditModalOpen, setIsMultiEditModalOpen] = useState(false);
+  const [showConfirmMultiDelete, setShowConfirmMultiDelete] = useState(false);
+  const [multiEditApplyText, setMultiEditApplyText] = useState(false);
+  const [multiEditText, setMultiEditText] = useState('');
+  const [multiEditApplyFontSize, setMultiEditApplyFontSize] = useState(false);
+  const [multiEditFontSize, setMultiEditFontSize] = useState(0);
+
   const [sourceLang, setSourceLang] = useState(() => {
     return safeGetItem('manga_source_lang') || 'Japanese';
   });
@@ -52,10 +62,10 @@ export default function App() {
     return safeGetItem('manga_target_lang') || 'Hindi';
   });
   const [selectedModel, setSelectedModel] = useState(() => {
-    return safeGetItem('manga_selected_model') || 'gemini-flash-latest';
+    return safeGetItem('manga_selected_model') || 'gemini-3.1-pro-preview';
   });
   const [temperature, setTemperature] = useState(() => {
-    return parseFloat(safeGetItem('manga_temperature') || '0.2');
+    return parseFloat(safeGetItem('manga_temperature') || '0.4');
   });
   const [autoDownload, setAutoDownload] = useState(() => {
     return safeGetItem('manga_auto_download') === 'true';
@@ -266,6 +276,79 @@ export default function App() {
       }
       return next;
     });
+  };
+
+  const handleToggleBlockSelection = (pageIndex: number, blockIndex: number) => {
+    setSelectedBlocks(prev => {
+      const exists = prev.findIndex(b => b.pageIndex === pageIndex && b.blockIndex === blockIndex);
+      if (exists >= 0) {
+        return prev.filter((_, i) => i !== exists);
+      } else {
+        return [...prev, { pageIndex, blockIndex }];
+      }
+    });
+  };
+
+  const handleMultiDelete = () => {
+    setItems(prevItems => {
+      const newItems = [...prevItems];
+      // Group blocks to delete by pageIndex, sort descending to avoid index shifting
+      const blocksToDeleteByPage = selectedBlocks.reduce((acc, curr) => {
+        if (!acc[curr.pageIndex]) acc[curr.pageIndex] = [];
+        acc[curr.pageIndex].push(curr.blockIndex);
+        return acc;
+      }, {} as Record<number, number[]>);
+
+      for (const [pageIdxStr, blockIndices] of Object.entries(blocksToDeleteByPage)) {
+        const pageIdx = parseInt(pageIdxStr);
+        if (newItems[pageIdx] && newItems[pageIdx].blocks) {
+          const sortedIndices = [...(blockIndices as number[])].sort((a, b) => b - a);
+          const newBlocks = [...newItems[pageIdx].blocks!];
+          for (const idx of sortedIndices) {
+            newBlocks.splice(idx, 1);
+          }
+          newItems[pageIdx] = { ...newItems[pageIdx], blocks: newBlocks };
+        }
+      }
+      return newItems;
+    });
+    setSelectedBlocks([]);
+    setIsMultiSelectMode(false);
+    notify.success(`Deleted ${selectedBlocks.length} blocks`);
+  };
+
+  const handleApplyMultiEdit = () => {
+    if (!multiEditApplyText && !multiEditApplyFontSize) {
+      setIsMultiEditModalOpen(false);
+      return;
+    }
+
+    setItems(prevItems => {
+      const newItems = [...prevItems];
+      for (const { pageIndex, blockIndex } of selectedBlocks) {
+        if (newItems[pageIndex] && newItems[pageIndex].blocks && newItems[pageIndex].blocks![blockIndex]) {
+          const block = newItems[pageIndex].blocks![blockIndex];
+          const updatedBlock = { ...block };
+          if (multiEditApplyText) {
+            updatedBlock.translatedText = multiEditText;
+            // Save to translation memory
+            saveToTranslationMemory(sourceLang, targetLang, block.originalText, multiEditText).catch(console.error);
+          }
+          if (multiEditApplyFontSize) {
+            updatedBlock.fontSize = multiEditFontSize === 0 ? undefined : multiEditFontSize;
+          }
+          
+          const newBlocks = [...newItems[pageIndex].blocks!];
+          newBlocks[blockIndex] = updatedBlock;
+          newItems[pageIndex] = { ...newItems[pageIndex], blocks: newBlocks };
+        }
+      }
+      return newItems;
+    });
+    setIsMultiEditModalOpen(false);
+    setSelectedBlocks([]);
+    setIsMultiSelectMode(false);
+    notify.success(`Updated ${selectedBlocks.length} blocks`);
   };
 
   const handleRemoveImage = (index: number) => {
@@ -521,18 +604,18 @@ export default function App() {
       <Toaster position="top-right" richColors />
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="bg-indigo-100 p-2 rounded-lg">
-              <Languages className="w-6 h-6 text-indigo-600" />
+          <div className="flex items-center space-x-2 flex-shrink-0">
+            <div className="bg-indigo-100 p-1.5 sm:p-2 rounded-lg">
+              <Languages className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-600" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-gray-900">Manga Translator</h1>
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-gray-900 hidden xs:block sm:block">Manga Translator</h1>
           </div>
-          <div className="flex items-center space-x-1 sm:space-x-2">
+          <div className="flex items-center space-x-0.5 sm:space-x-2 overflow-x-auto no-scrollbar">
             {items.some(item => item.status === 'done') && (
               <button
                 onClick={handleDownloadAll}
                 disabled={isDownloadingAll}
-                className="p-2 sm:p-3 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-w-[44px] min-h-[44px] flex items-center justify-center"
+                className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
                 aria-label="Download All"
                 title="Download All Translated Pages (PDF)"
               >
@@ -545,7 +628,7 @@ export default function App() {
             )}
             <button
               onClick={() => setIsHistoryOpen(true)}
-              className="p-2 sm:p-3 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+              className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
               aria-label="History"
               title="View Translation History"
             >
@@ -553,7 +636,7 @@ export default function App() {
             </button>
             <button
               onClick={() => setShowConfirmClearMemory(true)}
-              className="p-2 sm:p-3 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+              className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
               aria-label="Clear Translation Memory"
               title="Clear Translation Memory for current language pair"
             >
@@ -562,7 +645,7 @@ export default function App() {
             {items.length > 0 && (
               <button
                 onClick={handleReset}
-                className="p-2 sm:p-3 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
                 aria-label="Reset"
                 title="Clear Current Session"
               >
@@ -571,7 +654,7 @@ export default function App() {
             )}
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="p-2 sm:p-3 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+              className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
               aria-label="Settings"
               title="Settings & API Key"
             >
@@ -738,11 +821,11 @@ export default function App() {
 
               <div className="flex items-center justify-center space-x-2 w-full sm:w-auto order-3 sm:order-none">
                 {items.some(item => item.status === 'pending' || item.status === 'error') && (
-                  <div className="flex flex-wrap justify-center items-center gap-2">
+                  <div className="flex flex-wrap justify-center items-center gap-2 w-full sm:w-auto">
                     <select
                       value={batchMode}
                       onChange={(e) => setBatchMode(e.target.value as 'sequential' | 'parallel')}
-                      className="text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 py-2 pl-3 pr-8 min-h-[44px]"
+                      className="text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 py-2 pl-3 pr-8 min-h-[44px] flex-1 sm:flex-none"
                       title="Batch Mode"
                       disabled={isBatchTranslating}
                     >
@@ -764,7 +847,7 @@ export default function App() {
                     {isBatchTranslating ? (
                       <button
                         onClick={handleStopBatch}
-                        className="flex items-center justify-center space-x-1 px-4 py-2 bg-red-100 text-red-700 hover:bg-red-200 rounded-full text-sm font-medium transition-colors min-h-[44px] w-full sm:w-auto"
+                        className="flex items-center justify-center space-x-1 px-4 py-2 bg-red-100 text-red-700 hover:bg-red-200 rounded-full text-sm font-medium transition-colors min-h-[44px] flex-1 sm:flex-none sm:w-auto"
                         title="Stop batch translation"
                       >
                         <Square className="w-4 h-4 fill-current" />
@@ -773,7 +856,7 @@ export default function App() {
                     ) : (
                       <button
                         onClick={handleTranslateAll}
-                        className="flex items-center justify-center space-x-1 px-4 py-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded-full text-sm font-medium transition-colors min-h-[44px] w-full sm:w-auto"
+                        className="flex items-center justify-center space-x-1 px-4 py-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded-full text-sm font-medium transition-colors min-h-[44px] flex-1 sm:flex-none sm:w-auto"
                         title="Translate all pending pages"
                       >
                         <Play className="w-4 h-4" />
@@ -856,7 +939,32 @@ export default function App() {
 
                 {currentItem.status === 'done' && currentItem.blocks && (
                   <div className="w-full space-y-6">
-                    <TranslationOverlay imageUrl={currentItem.imageUrl} blocks={currentItem.blocks} onDeleteBlock={handleDeleteBlock} onEditBlock={handleEditBlock} fontFamily={fontFamily} />
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => {
+                          setIsMultiSelectMode(!isMultiSelectMode);
+                          if (isMultiSelectMode) setSelectedBlocks([]);
+                        }}
+                        className={`flex items-center space-x-2 px-4 py-2 rounded-full font-medium transition-colors text-sm ${
+                          isMultiSelectMode 
+                            ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' 
+                            : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <CheckSquare className="w-4 h-4" />
+                        <span>{isMultiSelectMode ? 'Done Selecting' : 'Select Multiple'}</span>
+                      </button>
+                    </div>
+                    <TranslationOverlay 
+                      imageUrl={currentItem.imageUrl} 
+                      blocks={currentItem.blocks} 
+                      onDeleteBlock={handleDeleteBlock} 
+                      onEditBlock={handleEditBlock} 
+                      fontFamily={fontFamily} 
+                      isMultiSelectMode={isMultiSelectMode}
+                      selectedBlockIndices={selectedBlocks.filter(b => b.pageIndex === currentIndex).map(b => b.blockIndex)}
+                      onToggleBlockSelection={(blockIndex) => handleToggleBlockSelection(currentIndex, blockIndex)}
+                    />
                     
                     {currentItem.usage && (
                       <div className="flex items-center justify-center text-sm text-gray-500 space-x-6 bg-white py-3 px-6 rounded-full shadow-sm border border-gray-100 w-max mx-auto">
@@ -935,6 +1043,131 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Multi-select Floating Action Bar */}
+      {selectedBlocks.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-white shadow-2xl rounded-full px-4 sm:px-6 py-3 flex items-center space-x-2 sm:space-x-4 z-50 border border-gray-200 animate-in slide-in-from-bottom-10">
+          <div className="flex items-center space-x-2 bg-indigo-50 px-3 py-1.5 rounded-full">
+            <Layers className="w-4 h-4 text-indigo-600" />
+            <span className="font-medium text-indigo-700 text-sm">{selectedBlocks.length} selected</span>
+          </div>
+          <div className="h-6 w-px bg-gray-200 hidden sm:block"></div>
+          <button 
+            onClick={() => setIsMultiEditModalOpen(true)} 
+            className="flex items-center space-x-1 text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium"
+          >
+            <Edit3 className="w-4 h-4" />
+            <span className="hidden sm:inline">Edit</span>
+          </button>
+          <button 
+            onClick={() => setShowConfirmMultiDelete(true)} 
+            className="flex items-center space-x-1 text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Delete</span>
+          </button>
+          <div className="h-6 w-px bg-gray-200 hidden sm:block"></div>
+          <button 
+            onClick={() => setSelectedBlocks([])} 
+            className="text-gray-500 hover:bg-gray-100 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Multi-Edit Modal */}
+      {isMultiEditModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 flex flex-col space-y-4">
+            <h3 className="text-lg font-semibold text-gray-900">Edit {selectedBlocks.length} Blocks</h3>
+            <div className="space-y-4">
+              <div className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <input 
+                  type="checkbox" 
+                  id="applyText"
+                  checked={multiEditApplyText} 
+                  onChange={e => setMultiEditApplyText(e.target.checked)} 
+                  className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" 
+                />
+                <div className="flex-1">
+                  <label htmlFor="applyText" className="block text-sm font-medium text-gray-700 mb-1 cursor-pointer">Apply New Text</label>
+                  <textarea
+                    disabled={!multiEditApplyText}
+                    value={multiEditText}
+                    onChange={(e) => setMultiEditText(e.target.value)}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 min-h-[100px] disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-sm"
+                    placeholder="Enter text to apply to all selected blocks..."
+                  />
+                </div>
+              </div>
+              <div className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <input 
+                  type="checkbox" 
+                  id="applyFontSize"
+                  checked={multiEditApplyFontSize} 
+                  onChange={e => setMultiEditApplyFontSize(e.target.checked)} 
+                  className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" 
+                />
+                <div className="flex-1">
+                  <label htmlFor="applyFontSize" className="block text-sm font-medium text-gray-700 mb-1 cursor-pointer">Apply Font Size (0 for auto)</label>
+                  <input
+                    disabled={!multiEditApplyFontSize}
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={multiEditFontSize}
+                    onChange={(e) => setMultiEditFontSize(parseInt(e.target.value) || 0)}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 pt-4 border-t border-gray-100">
+              <button
+                onClick={() => setIsMultiEditModalOpen(false)}
+                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApplyMultiEdit}
+                disabled={!multiEditApplyText && !multiEditApplyFontSize}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Apply to All
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Multi-Delete Confirm Modal */}
+      {showConfirmMultiDelete && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 flex flex-col space-y-4">
+            <h3 className="text-lg font-semibold text-gray-900">Delete Blocks</h3>
+            <p className="text-gray-600">Are you sure you want to delete {selectedBlocks.length} selected blocks? This action cannot be undone.</p>
+            <div className="flex justify-end space-x-3 pt-2">
+              <button
+                onClick={() => setShowConfirmMultiDelete(false)}
+                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors min-h-[44px]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowConfirmMultiDelete(false);
+                  handleMultiDelete();
+                }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors min-h-[44px]"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

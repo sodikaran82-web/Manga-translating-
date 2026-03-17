@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { TranslationBlock } from '../utils/geminiService';
-import { X, Sliders } from 'lucide-react';
+import { X, Sliders, Check } from 'lucide-react';
 
 interface TranslationOverlayProps {
   imageUrl: string;
@@ -8,6 +8,9 @@ interface TranslationOverlayProps {
   onDeleteBlock?: (index: number) => void;
   onEditBlock?: (index: number, newText: string, newFontSize?: number) => void;
   fontFamily?: string;
+  isMultiSelectMode?: boolean;
+  selectedBlockIndices?: number[];
+  onToggleBlockSelection?: (index: number) => void;
 }
 
 function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }: { text: string, originalText: string, isSelected: boolean, manualFontSize?: number, fontFamily?: string }) {
@@ -86,7 +89,7 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }
   );
 }
 
-export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBlock, fontFamily }: TranslationOverlayProps) {
+export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBlock, fontFamily, isMultiSelectMode, selectedBlockIndices = [], onToggleBlockSelection }: TranslationOverlayProps) {
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
   const [editingText, setEditingText] = useState<string>('');
   const [editingFontSize, setEditingFontSize] = useState<number | undefined>(undefined);
@@ -100,6 +103,10 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
   }, []);
 
   const handleSelectBlock = (index: number, block: TranslationBlock) => {
+    if (isMultiSelectMode && onToggleBlockSelection) {
+      onToggleBlockSelection(index);
+      return;
+    }
     if (selectedBlock === index) {
       setSelectedBlock(null);
     } else {
@@ -142,6 +149,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
         const left = `${xmin / 10}%`;
         
         const isSelected = selectedBlock === index;
+        const isMultiSelected = selectedBlockIndices.includes(index);
 
         return (
           <div
@@ -149,7 +157,9 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
             className={`absolute transition-all duration-200 ease-in-out flex flex-col items-center justify-center group ${
               isSelected 
                 ? 'bg-white z-50 shadow-2xl rounded-md p-3 sm:p-4 border-2 border-indigo-600' 
-                : 'bg-white/95 z-10 rounded-sm hover:ring-2 hover:ring-indigo-400 cursor-pointer shadow-sm'
+                : isMultiSelected
+                  ? 'bg-indigo-50/95 z-20 rounded-sm ring-2 ring-indigo-500 shadow-md cursor-pointer'
+                  : 'bg-white/95 z-10 rounded-sm hover:ring-2 hover:ring-indigo-400 cursor-pointer shadow-sm'
             }`}
             style={{ 
               top, 
@@ -166,6 +176,11 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
               }
             }}
           >
+            {isMultiSelected && !isSelected && (
+              <div className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 shadow-md z-20">
+                <Check className="w-3 h-3" />
+              </div>
+            )}
             {isSelected && onDeleteBlock && (
               <button
                 onClick={(e) => {
@@ -181,7 +196,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
             )}
             
             {isSelected ? (
-              <div className="flex flex-col w-full min-w-[200px]" onClick={(e) => e.stopPropagation()}>
+              <div className="flex flex-col w-full min-w-[200px] sm:min-w-[250px] max-w-[85vw]" onClick={(e) => e.stopPropagation()}>
                 <textarea
                   value={editingText}
                   onChange={handleTextChange}

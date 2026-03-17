@@ -85,8 +85,8 @@ export async function translateMangaPage(
   targetLanguage: string,
   customPrompt?: string,
   translationMemory?: Record<string, any>,
-  modelName: string = "gemini-flash-latest",
-  temperature: number = 0.2
+  modelName: string = "gemini-3.1-pro-preview",
+  temperature: number = 0.4
 ): Promise<TranslationResult> {
   const apiKey = getCustomApiKey() || (process.env.GEMINI_API_KEY as string);
   
@@ -95,7 +95,7 @@ export async function translateMangaPage(
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  const model = modelName || "gemini-flash-latest";
+  const model = modelName || "gemini-3.1-pro-preview";
 
   let retries = 3;
   let delay = 4000;
@@ -118,10 +118,13 @@ export async function translateMangaPage(
 
       const ocrPrompt = `Analyze this manga/comic page carefully. You must find and extract EVERY SINGLE piece of text on the page, AND translate it into ${targetLanguage}.
 
-Specific Instructions for Manga:
-1. **Extraction**: Accurately extract all text (${sourceLanguage}). Pay close attention to vertical text (top-to-bottom) which is common in manga.
-2. **Translation**: Translate the extracted text into natural, conversational ${targetLanguage}. If the text is ALREADY in ${targetLanguage}, keep it as is.
-3. **Sound Effects (SFX)**: Extract and translate stylized sound effects (e.g., "ゴゴゴ", "ドキドキ"). Even if they are integrated into the art, try to capture them.
+Specific Instructions for High-Quality Manga Localization:
+1. **Extraction**: Accurately extract all text (${sourceLanguage}). Pay close attention to vertical text (top-to-bottom), handwritten notes, and stylized fonts.
+2. **Natural Translation & Localization**: Translate the extracted text into highly natural, conversational ${targetLanguage}. 
+   - Adapt idioms, jokes, and cultural references so they make sense to a ${targetLanguage} speaker while preserving the original intent.
+   - Maintain the character's voice and tone (e.g., formal, casual, aggressive, polite, slang).
+   - Ensure the dialogue flows smoothly and sounds like something a native speaker would actually say in that situation.
+3. **Sound Effects (SFX)**: Extract and translate stylized sound effects (e.g., "ゴゴゴ" -> "RUMBLE", "ドキドキ" -> "THUMP THUMP"). Provide dynamic equivalents in ${targetLanguage}.
 4. **Exhaustive Search**: Do not skip small text, background signs, or character thought bubbles.
 ${customPrompt ? `5. **Additional Instructions**: ${customPrompt}` : ""}
 ${memoryString ? `\nTranslation Memory (Use these previously translated segments for consistency):\n${memoryString}` : ""}
@@ -129,9 +132,9 @@ ${memoryString ? `\nTranslation Memory (Use these previously translated segments
 For EACH piece of text found, provide:
 1. "box_2d": Its bounding box as [ymin, xmin, ymax, xmax] where coordinates are normalized between 0 and 1000.
 2. "originalText": The original text in ${sourceLanguage}.
-3. "translatedText": The translation in ${targetLanguage}.
+3. "translatedText": The localized translation in ${targetLanguage}.
 
-Return ONLY a valid JSON array of objects. Be extremely thorough.`;
+Return ONLY a valid JSON array of objects. Be extremely thorough and prioritize translation quality.`;
 
       const response = await ai.models.generateContent({
         model,
@@ -143,7 +146,9 @@ Return ONLY a valid JSON array of objects. Be extremely thorough.`;
         },
         config: {
           temperature,
-          systemInstruction: "You are an expert manga/comic translator. Your job is to extract EVERY SINGLE piece of text on the page and translate it. Do not miss any text, no matter how small or stylized. Be extremely thorough.",
+          topP: 0.95,
+          topK: 64,
+          systemInstruction: "You are an expert manga/comic translator and localizer. Your goal is to produce natural, fluent, and contextually appropriate translations that capture the tone, emotion, and nuances of the original text. You must extract EVERY SINGLE piece of text on the page and translate it. Do not miss any text, no matter how small or stylized. Be extremely thorough and prioritize high-quality localization.",
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
@@ -246,9 +251,9 @@ export async function translateImage(
   targetLanguage: string = "English",
   customPrompt?: string,
   translationMemory?: Record<string, any>,
-  modelName: string = "gemini-flash-latest",
+  modelName: string = "gemini-3.1-pro-preview",
   force: boolean = false,
-  temperature: number = 0.2
+  temperature: number = 0.4
 ) {
   if (!force) {
     const cached = getCachedTranslation(imageHash);
@@ -265,7 +270,7 @@ export async function translateImage(
   return result;
 }
 
-export async function translateBatch(images: { base64: string, mimeType: string }[], modelName: string = "gemini-flash-latest", temperature: number = 0.2) {
+export async function translateBatch(images: { base64: string, mimeType: string }[], modelName: string = "gemini-3.1-pro-preview", temperature: number = 0.4) {
   const apiKey = getCustomApiKey() || (process.env.GEMINI_API_KEY as string);
   const ai = new GoogleGenAI({ apiKey });
 
