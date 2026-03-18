@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { TranslationBlock } from '../utils/geminiService';
 import { X, Sliders, Check } from 'lucide-react';
 
@@ -17,6 +18,24 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLParagraphElement>(null);
   const [fontSize, setFontSize] = useState(manualFontSize || 14);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        setDimensions({
+          width: entry.contentRect.width,
+          height: entry.contentRect.height,
+        });
+      }
+    });
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (isSelected) {
@@ -24,27 +43,37 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }
       return;
     }
 
-    if (manualFontSize) {
-      setFontSize(manualFontSize);
-      return;
-    }
-    
     const container = containerRef.current;
     const textEl = textRef.current;
-    if (!container || !textEl) return;
+    if (!container || !textEl || dimensions.width === 0 || dimensions.height === 0) return;
 
-    // Reset for measurement
-    textEl.style.fontSize = '12px';
-    
-    const padding = 6; // Slightly more padding for better look
-    const availableHeight = container.clientHeight - padding;
-    const availableWidth = container.clientWidth - padding;
+    // Speech bubbles are often oval/elliptical. The bounding box is a rectangle.
+    // To prevent text from overflowing the curved edges of the bubble, we constrain
+    // the text to a smaller inner rectangle (e.g., 85% of the bounding box).
+    const availableHeight = dimensions.height * 0.85;
+    const availableWidth = dimensions.width * 0.85;
     
     if (availableHeight <= 0 || availableWidth <= 0) return;
 
-    let min = 8;
-    let max = 80; // Increased max for large bubbles
+    let min = 4;
+    // If manualFontSize is set, use it as the maximum allowed size.
+    // Otherwise, allow it to scale up to 80px to fill the bubble.
+    let max = manualFontSize || 80;
     let best = min;
+
+    // Temporarily remove constraints for accurate measurement
+    const originalMaxWidth = textEl.style.maxWidth;
+    const originalMaxHeight = textEl.style.maxHeight;
+    const originalFontSize = textEl.style.fontSize;
+    const originalWordBreak = textEl.style.wordBreak;
+    const originalOverflowWrap = textEl.style.overflowWrap;
+    
+    textEl.style.maxWidth = `${availableWidth}px`;
+    textEl.style.maxHeight = 'none';
+    // Disable word breaking during measurement so that long words force the font size to scale down
+    // instead of breaking in the middle of the word, which improves readability.
+    textEl.style.wordBreak = 'normal';
+    textEl.style.overflowWrap = 'normal';
 
     // Binary search for best font size
     while (min <= max) {
@@ -53,8 +82,8 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }
       
       // For measurement, we want to see if it fits within the width with wrapping
       // We also account for line-height by checking scrollHeight
-      const isHeightOk = textEl.scrollHeight <= availableHeight;
-      const isWidthOk = textEl.scrollWidth <= availableWidth;
+      const isHeightOk = textEl.scrollHeight <= availableHeight + 1; // +1 for subpixel slack
+      const isWidthOk = textEl.scrollWidth <= availableWidth + 1;
 
       if (isHeightOk && isWidthOk) {
         best = mid;
@@ -64,13 +93,20 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }
       }
     }
     
+    // Restore constraints
+    textEl.style.maxWidth = originalMaxWidth;
+    textEl.style.maxHeight = originalMaxHeight;
+    textEl.style.fontSize = originalFontSize;
+    textEl.style.wordBreak = originalWordBreak;
+    textEl.style.overflowWrap = originalOverflowWrap;
+    
     setFontSize(best);
-  }, [text, originalText, isSelected, manualFontSize, containerRef.current?.clientWidth, containerRef.current?.clientHeight]);
+  }, [text, originalText, isSelected, manualFontSize, dimensions.width, dimensions.height]);
 
   return (
     <div 
       ref={containerRef} 
-      className={`w-full h-full flex items-center justify-center ${isSelected ? 'overflow-y-auto max-h-[250px] scrollbar-thin p-2' : 'overflow-hidden p-0.5'}`}
+      className={`w-full h-full flex items-center justify-center ${isSelected ? 'overflow-y-auto max-h-[250px] scrollbar-thin p-2' : 'overflow-hidden'}`}
     >
       <p 
         ref={textRef} 
@@ -80,7 +116,8 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }
           overflowWrap: 'anywhere',
           fontSize: `${fontSize}px`,
           fontFamily: fontFamily || '"Comic Neue", Kalam, sans-serif',
-          width: '100%'
+          maxWidth: isSelected ? '100%' : '85%',
+          maxHeight: isSelected ? '100%' : '85%'
         }}
       >
         {text}
@@ -121,8 +158,8 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
   };
 
   const handleFontSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseInt(e.target.value);
-    setEditingFontSize(val === 0 ? undefined : val);
+    const val = parseFloat(e.target.value);
+    setEditingFontSize(val === 0 || isNaN(val) ? undefined : val);
   };
 
   const handleSaveEdit = (index: number) => {
@@ -137,7 +174,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
       <img src={imageUrl} alt="Manga page" className="w-full h-auto block" />
       
       {blocks.map((block, index) => {
-        const expand = 5; // Expand bounding box by 0.5% to cover artifacts and improve centering
+        const expand = 2; // Expand bounding box slightly to cover artifacts
         const ymin = Math.max(0, block.box_2d[0] - expand);
         const xmin = Math.max(0, block.box_2d[1] - expand);
         const ymax = Math.min(1000, block.box_2d[2] + expand);
@@ -152,8 +189,11 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
         const isMultiSelected = selectedBlockIndices.includes(index);
 
         return (
-          <div
+          <motion.div
             key={`${index}-${windowWidth}`}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            whileHover={{ scale: isSelected ? 1 : 1.02 }}
             className={`absolute transition-all duration-200 ease-in-out flex flex-col items-center justify-center group ${
               isSelected 
                 ? 'bg-white z-50 shadow-2xl rounded-md p-3 sm:p-4 border-2 border-indigo-600' 
@@ -177,12 +217,20 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
             }}
           >
             {isMultiSelected && !isSelected && (
-              <div className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 shadow-md z-20">
+              <motion.div 
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="absolute -top-2 -right-2 bg-indigo-600 text-white rounded-full p-0.5 shadow-md z-20"
+              >
                 <Check className="w-3 h-3" />
-              </div>
+              </motion.div>
             )}
             {isSelected && onDeleteBlock && (
-              <button
+              <motion.button
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
                 onClick={(e) => {
                   e.stopPropagation();
                   onDeleteBlock(index);
@@ -192,11 +240,16 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
                 aria-label="Delete text block"
               >
                 <X className="w-4 h-4" />
-              </button>
+              </motion.button>
             )}
             
             {isSelected ? (
-              <div className="flex flex-col w-full min-w-[200px] sm:min-w-[250px] max-w-[85vw]" onClick={(e) => e.stopPropagation()}>
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-col w-full min-w-[200px] sm:min-w-[250px] max-w-[85vw]" 
+                onClick={(e) => e.stopPropagation()}
+              >
                 <textarea
                   value={editingText}
                   onChange={handleTextChange}
@@ -206,49 +259,69 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
                 
                 <div className="flex flex-col space-y-1 mb-3">
                   <div className="flex justify-between items-center">
-                    <label className="text-[10px] font-bold uppercase text-gray-500">Font Size</label>
+                    <label className="text-[10px] font-bold uppercase text-gray-500">Font Size (pt/px)</label>
                     <span className="text-[10px] font-mono bg-gray-100 px-1 rounded">
                       {editingFontSize || 'Auto'}
                     </span>
                   </div>
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="40" 
-                    step="1"
-                    value={editingFontSize || 0}
-                    onChange={handleFontSizeChange}
-                    className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                  />
+                  <div className="flex items-center space-x-2">
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="40" 
+                      step="0.5"
+                      value={editingFontSize || 0}
+                      onChange={handleFontSizeChange}
+                      className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                    />
+                    <input 
+                      type="number" 
+                      min="0" 
+                      max="100" 
+                      step="0.5"
+                      value={editingFontSize || 0}
+                      onChange={handleFontSizeChange}
+                      className="w-16 p-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
                   <p className="text-[9px] text-gray-400 italic">Set to 0 for auto-scaling</p>
                 </div>
 
                 <div className="flex justify-end space-x-2">
-                  <button
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                     onClick={() => setSelectedBlock(null)}
                     className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded"
                   >
                     Cancel
-                  </button>
-                  <button
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                     onClick={() => handleSaveEdit(index)}
                     className="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded"
                   >
                     Save
-                  </button>
+                  </motion.button>
                 </div>
-              </div>
+              </motion.div>
             ) : (
               <>
                 <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} manualFontSize={block.fontSize} fontFamily={fontFamily} />
                 {block.fontSize && (
-                  <div className="absolute -top-1 -left-1 bg-indigo-600 text-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity z-20" title={`Manual Font Size: ${block.fontSize}px`}>
+                  <motion.div 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="absolute -top-1 -left-1 bg-indigo-600 text-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity z-20" 
+                    title={`Manual Font Size: ${block.fontSize}px`}
+                  >
                     <Sliders className="w-2.5 h-2.5" />
-                  </div>
+                  </motion.div>
                 )}
               </>
             )}
-          </div>
+          </motion.div>
         );
       })}
     </div>

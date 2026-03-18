@@ -1,4 +1,4 @@
-import { get, set } from 'idb-keyval';
+import { get, set, keys } from 'idb-keyval';
 
 export interface TranslationMemoryEntry {
   originalText: string;
@@ -9,6 +9,31 @@ export interface TranslationMemoryEntry {
 export type TranslationMemory = Record<string, TranslationMemoryEntry>;
 
 const MEMORY_KEY_PREFIX = 'manga_translation_memory_';
+
+export async function getAllTranslationMemoryPairs(): Promise<string[]> {
+  try {
+    const allKeys = await keys();
+    return allKeys
+      .filter(k => typeof k === 'string' && k.startsWith(MEMORY_KEY_PREFIX))
+      .map(k => (k as string).replace(MEMORY_KEY_PREFIX, ''));
+  } catch (e) {
+    console.warn("Failed to get translation memory keys", e);
+    return [];
+  }
+}
+
+export async function deleteTranslationMemoryEntry(sourceLang: string, targetLang: string, originalText: string): Promise<void> {
+  try {
+    const key = `${MEMORY_KEY_PREFIX}${sourceLang}_${targetLang}`;
+    const memory = await getTranslationMemory(sourceLang, targetLang);
+    if (memory[originalText]) {
+      delete memory[originalText];
+      await set(key, memory);
+    }
+  } catch (e) {
+    console.warn("Failed to delete translation memory entry", e);
+  }
+}
 
 export async function getTranslationMemory(sourceLang: string, targetLang: string): Promise<TranslationMemory> {
   try {

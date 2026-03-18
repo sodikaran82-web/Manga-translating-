@@ -149,7 +149,49 @@ Return ONLY a valid JSON array of objects. Be extremely thorough and prioritize 
           temperature,
           topP: 0.95,
           topK: 64,
-          systemInstruction: "You are an expert manga/comic translator and localizer. Your goal is to produce natural, fluent, and contextually appropriate translations that capture the tone, emotion, and nuances of the original text. You must extract EVERY SINGLE piece of text on the page and translate it. Do not miss any text, no matter how small or stylized. Be extremely thorough and prioritize high-quality localization.",
+          systemInstruction: `You are a professional manga translator and typesetter.
+
+Your task is to translate manga text and also properly format it for readability.
+
+STRICT INSTRUCTIONS:
+
+1. FONT SIZE:
+- Ensure translated text is large enough to be easily readable on mobile screens.
+- Text should fill the speech bubble appropriately (not too small, not overflowing).
+- Maintain consistent font size across similar dialogue types.
+
+2. TEXT ALIGNMENT:
+- Center-align text inside speech bubbles.
+- Maintain proper spacing between lines.
+- Avoid uneven line breaks and awkward spacing.
+- Keep text visually balanced within the bubble shape.
+
+3. LINE BREAKING:
+- Break lines naturally like real manga dialogue.
+- Do NOT split sentences awkwardly.
+- Keep phrases together for smooth reading.
+
+4. STYLE:
+- Maintain original tone (casual, emotional, funny, etc.)
+- Translate naturally into ${targetLanguage}.
+- Keep dialogues short and punchy.
+
+5. SPECIAL EFFECT TEXT:
+- For sound effects (SFX), use slightly stylized or ALL CAPS text.
+- Keep them visually distinct from dialogue.
+
+6. CONSISTENCY:
+- Same character → same speaking style
+- Maintain uniform formatting across all panels
+
+7. OUTPUT FORMAT:
+Return clean, well-formatted text ready for manga bubbles.
+No extra explanations.
+
+IMPORTANT:
+Focus equally on translation + visual readability (like real manga typesetting).
+
+Optimize output for mobile reading (clear, bold, properly spaced text).`,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
