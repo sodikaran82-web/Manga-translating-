@@ -435,6 +435,8 @@ export default function App() {
   const generateTranslatedCanvas = async (item: TranslationItem): Promise<HTMLCanvasElement | null> => {
     if (!item || !item.imageUrl || !item.blocks) return null;
 
+    await document.fonts.ready;
+
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.src = item.imageUrl;
@@ -451,6 +453,8 @@ export default function App() {
     ctx.drawImage(img, 0, 0);
 
     item.blocks.forEach((block) => {
+      if (!block.translatedText || block.translatedText.trim() === '') return;
+
       const expand = 2;
       const ymin = Math.max(0, block.box_2d[0] - expand);
       const xmin = Math.max(0, block.box_2d[1] - expand);
@@ -463,130 +467,142 @@ export default function App() {
       const h = ((ymax - ymin) / 1000) * canvas.height;
 
       // Draw rounded rectangle
-      const radius = 8;
+      const radius = 2; // Match rounded-sm
       
       let lines: string[] = [];
-      // Use 10% padding on each side to constrain text to 80% of the bounding box,
+      // Use 5% padding on each side to constrain text to 90% of the bounding box,
       // matching the HTML overlay and keeping text inside oval speech bubbles.
-      const paddingX = w * 0.1;
-      const paddingY = h * 0.1;
+      const paddingX = w * 0.05;
+      const paddingY = h * 0.05;
       
-      const comicFontFamily = fontFamily || '"Comic Sans MS", "Chalkboard SE", "Comic Neue", sans-serif';
-      let fontSize = block.fontSize || Math.floor(Math.min(120, h * 0.8));
-      const minFontSize = 4;
+      const comicFontFamily = fontFamily || '"Comic Neue", Kalam, sans-serif';
+      
+      // Calculate scale factor from screen to canvas
+      const renderedImageWidth = Math.min(window.innerWidth, 672);
+      const scaleFactor = canvas.width / renderedImageWidth;
+      
+      const minCanvasFontSize = Math.max(4, Math.floor(4 * scaleFactor));
+      const maxCanvasFontSize = Math.floor((block.fontSize || 80) * scaleFactor);
+      
+      let fontSize = minCanvasFontSize;
       let lineHeight = 0;
       let finalW = w;
       let finalH = h;
-      
-      // If manual font size is set, we don't binary search/scale down, we just use it
-      if (block.fontSize) {
-        ctx.font = `bold ${fontSize}px ${comicFontFamily}`;
-        lineHeight = fontSize * 1.15;
-        const words = block.translatedText.trim().split(/\s+/);
+
+      // Helper function for balanced text wrapping (mimics text-wrap: balance)
+      const wrapTextBalanced = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
+        const words = text.trim().split(/\s+/);
+        if (words.length === 0 || (words.length === 1 && words[0] === '')) return [];
+        if (words.length === 1) return words;
+
+        let greedyLines: string[] = [];
         let line = '';
-        lines = [];
-        for (let n = 0; n < words.length; n++) {
-          const testLine = line + (line ? ' ' : '') + words[n];
-          const metrics = ctx.measureText(testLine);
-          if (metrics.width > w - paddingX * 2 && n > 0) {
-            lines.push(line);
-            line = words[n];
+        for (let i = 0; i < words.length; i++) {
+          const testLine = line + (line ? ' ' : '') + words[i];
+          if (ctx.measureText(testLine).width > maxWidth && i > 0) {
+            greedyLines.push(line);
+            line = words[i];
           } else {
             line = testLine;
           }
         }
-        if (line) lines.push(line);
-        
-        // Expand box if text is larger
-        const totalHeight = lines.length * lineHeight;
-        let maxLineWidth = 0;
-        lines.forEach(l => {
-            maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
-        });
-        finalW = Math.max(w, maxLineWidth + paddingX * 2);
-        finalH = Math.max(h, totalHeight + paddingY * 2);
-      } else {
-        // Binary search for the best font size
-        let low = minFontSize;
-        let high = Math.floor(Math.min(120, h * 0.8));
-        let bestFontSize = minFontSize;
-        let bestLines: string[] = [];
-        
+        if (line) greedyLines.push(line);
+
+        const numLines = greedyLines.length;
+        if (numLines <= 1) return greedyLines;
+
+        let low = 0;
+        let high = maxWidth;
+        let bestLines = greedyLines;
+
+        let minWordWidth = 0;
+        for (const word of words) {
+          minWordWidth = Math.max(minWordWidth, ctx.measureText(word).width);
+        }
+        low = minWordWidth;
+
         while (low <= high) {
-          const mid = Math.floor((low + high) / 2);
-          ctx.font = `bold ${mid}px ${comicFontFamily}`;
-          const currentLineHeight = mid * 1.15;
-          
-          const words = block.translatedText.trim().split(/\s+/);
-          let line = '';
+          const mid = (low + high) / 2;
           let currentLines: string[] = [];
+          let currentLine = '';
+          let valid = true;
           
-          // To make text more bubble-shaped, we can slightly reduce the allowed width
-          // based on how many lines we expect, but for simplicity we'll use a fixed width
-          // However, we can try to balance the lines better.
-          const targetWidth = w - paddingX * 2;
-          
-          for (let n = 0; n < words.length; n++) {
-            const testLine = line + (line ? ' ' : '') + words[n];
-            const metrics = ctx.measureText(testLine);
-            
-            if (metrics.width > targetWidth && n > 0) {
-              currentLines.push(line);
-              line = words[n];
+          for (let i = 0; i < words.length; i++) {
+            const testLine = currentLine + (currentLine ? ' ' : '') + words[i];
+            if (ctx.measureText(testLine).width > mid) {
+              if (!currentLine) {
+                valid = false;
+                break;
+              }
+              currentLines.push(currentLine);
+              currentLine = words[i];
             } else {
-              line = testLine;
+              currentLine = testLine;
             }
           }
-          if (line) currentLines.push(line);
-          
-          const totalHeight = currentLines.length * currentLineHeight;
-          let maxLineWidth = 0;
-          currentLines.forEach(l => {
-              maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
-          });
+          if (currentLine) currentLines.push(currentLine);
 
-          if (totalHeight <= h - paddingY * 2 && maxLineWidth <= w - paddingX * 2) {
-            bestFontSize = mid;
+          if (valid && currentLines.length <= numLines) {
             bestLines = currentLines;
-            low = mid + 1;
+            high = mid - 0.5;
           } else {
-            high = mid - 1;
+            low = mid + 0.5;
           }
         }
+        return bestLines;
+      };
+      
+      // Binary search for the best font size
+      let low = minCanvasFontSize;
+      let high = maxCanvasFontSize;
+      let bestFontSize = minCanvasFontSize;
+      let bestLines: string[] = [];
+      
+      while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        if (mid < low) break;
         
-        fontSize = bestFontSize;
-        lines = bestLines;
-        lineHeight = fontSize * 1.15;
-        ctx.font = `bold ${fontSize}px ${comicFontFamily}`;
+        ctx.font = `bold ${mid}px ${comicFontFamily}`;
+        const currentLineHeight = mid * 1.1;
         
-        // If even minFontSize doesn't fit, we need to expand the box
-        if (fontSize === minFontSize && lines.length === 0) {
-           // Recalculate with minFontSize
-           ctx.font = `bold ${minFontSize}px ${comicFontFamily}`;
-           lineHeight = minFontSize * 1.15;
-           const words = block.translatedText.trim().split(/\s+/);
-           let line = '';
-           for (let n = 0; n < words.length; n++) {
-             const testLine = line + (line ? ' ' : '') + words[n];
-             const metrics = ctx.measureText(testLine);
-             if (metrics.width > w - paddingX * 2 && n > 0) {
-               lines.push(line);
-               line = words[n];
-             } else {
-               line = testLine;
-             }
-           }
-           if (line) lines.push(line);
-           
-           const totalHeight = lines.length * lineHeight;
-           let maxLineWidth = 0;
-           lines.forEach(l => {
-               maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
-           });
-           // We do NOT expand finalW and finalH here to prevent going outside the speech bubble
-           // finalW = Math.max(w, maxLineWidth + paddingX * 2);
-           // finalH = Math.max(h, totalHeight + paddingY * 2);
+        const targetWidth = w - paddingX * 2;
+        const currentLines = wrapTextBalanced(ctx, block.translatedText, targetWidth);
+        
+        const totalHeight = currentLines.length * currentLineHeight;
+        let maxLineWidth = 0;
+        currentLines.forEach(l => {
+            maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
+        });
+
+        if (totalHeight <= h - paddingY * 2 && maxLineWidth <= w - paddingX * 2) {
+          bestFontSize = mid;
+          bestLines = currentLines;
+          low = mid + 1;
+        } else {
+          high = mid - 1;
         }
+      }
+      
+      fontSize = bestFontSize;
+      lines = bestLines;
+      lineHeight = fontSize * 1.1;
+      ctx.font = `bold ${fontSize}px ${comicFontFamily}`;
+      
+      // If even minCanvasFontSize doesn't fit, we need to expand the box
+      if (lines.length === 0) {
+         fontSize = minCanvasFontSize;
+         ctx.font = `bold ${fontSize}px ${comicFontFamily}`;
+         lineHeight = fontSize * 1.1;
+         lines = wrapTextBalanced(ctx, block.translatedText, w - paddingX * 2);
+         
+         const totalHeight = lines.length * lineHeight;
+         let maxLineWidth = 0;
+         lines.forEach(l => {
+             maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
+         });
+         // Expand finalW and finalH slightly to ensure text is readable
+         finalW = Math.max(w, maxLineWidth + paddingX * 2);
+         finalH = Math.max(h, totalHeight + paddingY * 2);
       }
 
       // Center the expanded box around the original center
@@ -616,25 +632,31 @@ export default function App() {
       ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
       ctx.closePath();
       
-      ctx.fillStyle = 'white';
+      // Match bg-white/95 and shadow-sm from TranslationOverlay
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.05)';
+      ctx.shadowBlur = 2;
+      ctx.shadowOffsetY = 1;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
       ctx.fill();
       
-      // Optional: add a subtle stroke to blend with the page
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      // Reset shadow for text
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
 
-      ctx.fillStyle = '#111111'; // Slightly off-black for better reading
+      ctx.fillStyle = '#000000'; // Match text-black
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       const startY = drawY + finalH / 2 - ((lines.length - 1) * lineHeight) / 2;
       
       lines.forEach((lineText, i) => {
-        // Add a white stroke to the text to ensure it's readable even if the background isn't perfect
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 3;
-        ctx.strokeText(lineText.trim(), drawX + finalW / 2, startY + i * lineHeight);
+        // Match textShadow: '0px 0px 2px rgba(255,255,255,0.8)'
+        ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+        ctx.shadowBlur = 2;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        
         ctx.fillText(lineText.trim(), drawX + finalW / 2, startY + i * lineHeight);
       });
       
