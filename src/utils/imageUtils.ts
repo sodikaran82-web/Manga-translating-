@@ -7,7 +7,7 @@ export function resizeImage(file: File): Promise<Blob | null> {
 
   return new Promise(resolve => {
     img.onload = () => {
-      const MAX = 1200;
+      const MAX = 1000;
       const scale = Math.min(1, Math.min(MAX / img.width, MAX / img.height));
 
       canvas.width = img.width * scale;
@@ -19,7 +19,7 @@ export function resizeImage(file: File): Promise<Blob | null> {
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       }
 
-      canvas.toBlob(resolve, "image/jpeg", 0.8);
+      canvas.toBlob(resolve, "image/jpeg", 0.7);
       URL.revokeObjectURL(img.src);
     };
     img.onerror = () => {

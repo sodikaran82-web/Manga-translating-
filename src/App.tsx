@@ -63,7 +63,7 @@ export default function App() {
     return safeGetItem('manga_target_lang') || 'Hindi';
   });
   const [selectedModel, setSelectedModel] = useState(() => {
-    return safeGetItem('manga_selected_model') || 'gemini-3.1-pro-preview';
+    return safeGetItem('manga_selected_model') || 'gemini-3.1-flash-lite-preview';
   });
   const [temperature, setTemperature] = useState(() => {
     return parseFloat(safeGetItem('manga_temperature') || '0.4');

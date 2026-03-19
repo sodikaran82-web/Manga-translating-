@@ -4,8 +4,8 @@ import { getCustomApiKey, setCustomApiKey } from '../utils/geminiService';
 import { getAllTranslationMemoryPairs, getTranslationMemory, deleteTranslationMemoryEntry, TranslationMemoryEntry } from '../utils/translationMemoryService';
 
 export const AVAILABLE_MODELS = [
-  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview (Fastest)' },
-  { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite (Free Tier Friendly)' },
+  { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite (Fastest)' },
+  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview (Fast)' },
   { id: 'gemini-flash-latest', name: 'Gemini Flash Latest (Stable)' },
   { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview (Best Quality)' }
 ];

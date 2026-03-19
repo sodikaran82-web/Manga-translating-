@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import { safeGetItem, safeSetItem, safeRemoveItem } from './storage';
 import { getCachedTranslation, setCachedTranslation } from "./translationCache";
 
@@ -146,6 +146,7 @@ Return ONLY a valid JSON array of objects. Be extremely thorough and prioritize 
           ]
         },
         config: {
+          ...(model.includes('gemini-3') ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
           temperature,
           topP: 0.95,
           topK: 64,
@@ -334,6 +335,7 @@ ${images.map((_, i) => `Image ${i + 1}`).join("\n")}
       ]
     },
     config: {
+      ...(modelName.includes('gemini-3') ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
       temperature,
       maxOutputTokens: 400,
       responseMimeType: "application/json"
