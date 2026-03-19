@@ -49,9 +49,9 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }
 
     // Speech bubbles are often oval/elliptical. The bounding box is a rectangle.
     // To prevent text from overflowing the curved edges of the bubble, we constrain
-    // the text to a smaller inner rectangle (e.g., 85% of the bounding box).
-    const availableHeight = dimensions.height * 0.85;
-    const availableWidth = dimensions.width * 0.85;
+    // the text to a smaller inner rectangle (e.g., 90% of the bounding box).
+    const availableHeight = dimensions.height * 0.90;
+    const availableWidth = dimensions.width * 0.90;
     
     if (availableHeight <= 0 || availableWidth <= 0) return;
 
@@ -110,14 +110,18 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }
     >
       <p 
         ref={textRef} 
-        className="text-black text-center font-bold leading-[1.15] m-0 p-0" 
+        className="text-black text-center font-bold m-0 p-0" 
         style={{ 
           wordBreak: 'break-word',
           overflowWrap: 'anywhere',
+          textWrap: 'balance',
+          lineHeight: '1.1',
+          letterSpacing: '-0.02em',
           fontSize: `${fontSize}px`,
           fontFamily: fontFamily || '"Comic Neue", Kalam, sans-serif',
-          maxWidth: isSelected ? '100%' : '85%',
-          maxHeight: isSelected ? '100%' : '85%'
+          maxWidth: isSelected ? '100%' : '90%',
+          maxHeight: isSelected ? '100%' : '90%',
+          textShadow: isSelected ? 'none' : '0px 0px 2px rgba(255,255,255,0.8)'
         }}
       >
         {text}

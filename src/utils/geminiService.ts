@@ -117,20 +117,19 @@ export async function translateMangaPage(
           .join('\n');
       }
 
-      const ocrPrompt = `Analyze this manga/comic page carefully. You must find and extract EVERY SINGLE piece of text on the page, AND translate it into ${targetLanguage}.
+      const ocrPrompt = `Analyze this manga/comic page carefully. You must explicitly identify the boundaries of speech bubbles and thought bubbles, and extract text ONLY from within those bubbles, AND translate it into ${targetLanguage}.
 
 Specific Instructions for High-Quality Manga Localization:
-1. **Extraction**: Accurately extract all text (${sourceLanguage}). Pay close attention to vertical text (top-to-bottom), handwritten notes, and stylized fonts.
+1. **Speech Bubble Detection & Extraction**: Accurately detect speech and thought bubbles. Extract text (${sourceLanguage}) ONLY from these bubbles. Ignore background text, ambient sound effects outside bubbles, or non-dialogue text to filter out noise.
 2. **Natural Translation & Localization**: Translate the extracted text into highly natural, conversational ${targetLanguage}. 
    - Adapt idioms, jokes, and cultural references so they make sense to a ${targetLanguage} speaker while preserving the original intent.
    - Maintain the character's voice and tone (e.g., formal, casual, aggressive, polite, slang).
    - Ensure the dialogue flows smoothly and sounds like something a native speaker would actually say in that situation.
-3. **Sound Effects (SFX)**: Extract and translate stylized sound effects (e.g., "ゴゴゴ" -> "RUMBLE", "ドキドキ" -> "THUMP THUMP"). Provide dynamic equivalents in ${targetLanguage}.
-4. **Exhaustive Search**: Do not skip small text, background signs, or character thought bubbles.
-${customPrompt ? `5. **Additional Instructions**: ${customPrompt}` : ""}
+3. **Bounding Boxes**: The bounding box must accurately encompass the entire speech bubble to allow for proper text replacement and formatting.
+${customPrompt ? `4. **Additional Instructions**: ${customPrompt}` : ""}
 ${memoryString ? `\nTranslation Memory (Use these previously translated segments for consistency):\n${memoryString}` : ""}
 
-For EACH piece of text found, provide:
+For EACH speech/thought bubble found, provide:
 1. "box_2d": Its bounding box as [ymin, xmin, ymax, xmax] where coordinates are normalized between 0 and 1000.
 2. "originalText": The original text in ${sourceLanguage}.
 3. "translatedText": The localized translation in ${targetLanguage}.
