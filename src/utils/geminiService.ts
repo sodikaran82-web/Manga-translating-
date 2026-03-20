@@ -20,6 +20,8 @@ export interface TranslationBlock {
   originalText: string;
   translatedText: string;
   fontSize?: number;
+  fontWeight?: 'normal' | 'bold';
+  color?: string;
   cached?: boolean;
 }
 
@@ -98,12 +100,12 @@ export async function translateMangaPage(
   const ai = new GoogleGenAI({ apiKey });
   const model = modelName || "gemini-3.1-pro-preview";
 
-  let retries = 3;
-  let delay = 4000;
+  const maxRetries = 2;
 
-  while (retries > 0) {
+  // 3. Cleaner retry loop with exponential backoff
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`[translateMangaPage] Starting single-pass translation request. Retries left: ${retries}`);
+      console.log(`[translateMangaPage] Starting single-pass translation request. Attempt: ${attempt + 1}/${maxRetries + 1}`);
       
       let memoryString = "";
       if (translationMemory && Object.keys(translationMemory).length > 0) {
@@ -270,20 +272,39 @@ Optimize output for mobile reading (clear, bold, properly spaced text).`,
         errorMessage.toLowerCase().includes("high demand") ||
         errorMessage.toLowerCase().includes("timed out")
       ) {
-        retries--;
-        if (retries === 0) {
+        if (attempt === maxRetries) {
           throw new Error("API is currently overloaded or rate limit reached. Please wait a moment and try again, or add your own API key in Settings.");
         }
-        console.log(`[translateMangaPage] API overloaded/rate limit hit. Retrying in ${delay}ms... (${retries} retries left)`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        delay = Math.min(delay * 2, 30000);
+        
+        // Wait longer on each retry (e.g. 2s, 4s, 8s)
+        const backoffTime = 2000 * Math.pow(2, attempt);
+        console.log(`[translateMangaPage] API overloaded/rate limit hit. Retrying in ${backoffTime}ms...`);
+        await new Promise(res => setTimeout(res, backoffTime));
       } else {
-        throw new Error(`Translation failed: ${errorMessage}`);
+        if (attempt === maxRetries) {
+          throw new Error(`Translation failed: ${errorMessage}`);
+        }
+        // For other errors, still retry with backoff just in case it's a transient issue
+        const backoffTime = 2000 * Math.pow(2, attempt);
+        console.log(`[translateMangaPage] Transient error. Retrying in ${backoffTime}ms...`);
+        await new Promise(res => setTimeout(res, backoffTime));
       }
     }
   }
   
-  return { blocks: [] };
+  throw new Error("Translation failed after retries.");
+}
+
+// 1. Move cache OUTSIDE the function so it actually persists across calls
+const translationCache = new Map<string, TranslationResult>();
+
+// Extracted to a clean utility function
+export async function generateImageHash(params: string[]): Promise<string> {
+  const data = new TextEncoder().encode(params.join("|"));
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest), b =>
+    b.toString(16).padStart(2, "0")
+  ).join("");
 }
 
 export async function translateImage(
@@ -298,16 +319,24 @@ export async function translateImage(
   force: boolean = false,
   temperature: number = 0.4
 ) {
+  // 2. Check cache first
   if (!force) {
+    if (translationCache.has(imageHash)) {
+      console.log("Using in-memory cached translation");
+      return translationCache.get(imageHash)!;
+    }
+    
     const cached = getCachedTranslation(imageHash);
     if (cached) {
-      console.log("Using cached translation");
+      console.log("Using localStorage cached translation");
+      translationCache.set(imageHash, cached);
       return cached;
     }
   }
 
   const result = await translateMangaPage(base64Image, mimeType, sourceLanguage, targetLanguage, customPrompt, translationMemory, modelName, temperature);
 
+  translationCache.set(imageHash, result);
   setCachedTranslation(imageHash, result);
 
   return result;

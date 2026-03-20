@@ -7,8 +7,7 @@ export const AVAILABLE_MODELS = [
   { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite (Fastest)' },
   { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview (Fast)' },
   { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview (Best Quality)' },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' }
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }
 ];
 
 interface SettingsModalProps {

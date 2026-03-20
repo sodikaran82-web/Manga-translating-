@@ -3,7 +3,7 @@ export class RequestQueue {
   private isProcessing = false;
   private delayMs: number;
 
-  constructor(delayMs = 6000) {
+  constructor(delayMs = 800) {
     this.delayMs = delayMs;
   }
 
@@ -22,14 +22,14 @@ export class RequestQueue {
         }
       });
       
-      if (!this.isProcessing) {
-        this.processNext();
-      }
+      this.processNext();
     });
   }
 
   private async processNext() {
+    if (this.isProcessing) return;
     this.isProcessing = true;
+
     while (this.queue.length > 0) {
       const task = this.queue.shift();
       if (task) {
@@ -53,5 +53,4 @@ export class RequestQueue {
 }
 
 // Global singleton queue to ensure rate limits across the entire app
-// 6000ms delay ensures max 10 requests per minute (Gemini free tier allows 15 RPM)
-export const translationQueue = new RequestQueue(6000);
+export const translationQueue = new RequestQueue(800);

@@ -10,7 +10,7 @@ import { ImageUploader } from './components/ImageUploader';
 import { TranslationOverlay } from './components/TranslationOverlay';
 import { HistoryModal } from './components/HistoryModal';
 import { SettingsModal } from './components/SettingsModal';
-import { translateMangaPage, translateImage, translateBatch, TranslationBlock, TokenUsage } from './utils/geminiService';
+import { translateMangaPage, translateImage, translateBatch, TranslationBlock, TokenUsage, generateImageHash } from './utils/geminiService';
 import { saveToHistory, HistoryItem } from './utils/historyService';
 import { getTranslationMemory, saveToTranslationMemory, saveMultipleToTranslationMemory, clearTranslationMemory } from './utils/translationMemoryService';
 import { translationQueue } from './utils/requestQueue';
@@ -157,12 +157,23 @@ export default function App() {
         throw new Error("No image data available.");
       }
 
-      const imageHash = `${item.id}_${sourceLang}_${targetLang}_${selectedModel}_${customPrompt}_${temperature}`;
+      const imageHash = await generateImageHash([
+        base64Data,
+        mimeType,
+        sourceLang,
+        targetLang,
+        selectedModel,
+        customPrompt,
+        temperature.toString()
+      ]);
       const memory = await getTranslationMemory(sourceLang, targetLang);
+
+      // Adjust queue delay dynamically based on mode
+      translationQueue.setDelay(batchMode === 'parallel' ? 500 : 800);
 
       // Add the request to the global queue to enforce rate limits
       const result = await translationQueue.add(() => 
-        translateImage(imageHash, base64Data, mimeType, sourceLang, targetLang, customPrompt, memory as any, selectedModel, true, temperature)
+        translateImage(imageHash, base64Data, mimeType, sourceLang, targetLang, customPrompt, memory as any, selectedModel, false, temperature)
       );
       
       const textCache = loadTextCache();
@@ -244,8 +255,8 @@ export default function App() {
     stopBatchRef.current = false;
 
     try {
-      // Set delay based on batch mode (parallel can be faster if using paid API, but queue still protects it)
-      translationQueue.setDelay(batchMode === 'parallel' ? 2000 : 6000);
+      // Set delay based on batch mode
+      translationQueue.setDelay(batchMode === 'parallel' ? 500 : 800);
 
       // Map all pending items to promises. The translationQueue will handle rate limiting and sequential execution automatically.
       const promises = pendingItems.map(async ({ item, index }) => {
@@ -300,7 +311,7 @@ export default function App() {
     });
   };
 
-  const handleEditBlock = async (indexToEdit: number, newText: string, newFontSize?: number) => {
+  const handleEditBlock = async (indexToEdit: number, newText: string, newFontSize?: number, newFontWeight?: 'normal' | 'bold', newColor?: string) => {
     setItems(prev => {
       const next = [...prev];
       const currentItem = next[currentIndex];
@@ -310,6 +321,8 @@ export default function App() {
         if (block) {
           block.translatedText = newText;
           block.fontSize = newFontSize;
+          block.fontWeight = newFontWeight;
+          block.color = newColor;
           // Save the edited translation to memory
           saveToTranslationMemory(sourceLang, targetLang, block.originalText, newText).catch(console.error);
           

@@ -7,14 +7,14 @@ interface TranslationOverlayProps {
   imageUrl: string;
   blocks: TranslationBlock[];
   onDeleteBlock?: (index: number) => void;
-  onEditBlock?: (index: number, newText: string, newFontSize?: number) => void;
+  onEditBlock?: (index: number, newText: string, newFontSize?: number, newFontWeight?: 'normal' | 'bold', newColor?: string) => void;
   fontFamily?: string;
   isMultiSelectMode?: boolean;
   selectedBlockIndices?: number[];
   onToggleBlockSelection?: (index: number) => void;
 }
 
-function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }: { text: string, originalText: string, isSelected: boolean, manualFontSize?: number, fontFamily?: string }) {
+function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily, fontWeight, color }: { text: string, originalText: string, isSelected: boolean, manualFontSize?: number, fontFamily?: string, fontWeight?: 'normal' | 'bold', color?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLParagraphElement>(null);
   const [fontSize, setFontSize] = useState(manualFontSize || 14);
@@ -110,8 +110,9 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }
     >
       <p 
         ref={textRef} 
-        className="text-black text-center font-bold m-0 p-0" 
+        className={`text-center m-0 p-0 ${fontWeight === 'normal' ? 'font-normal' : 'font-bold'}`} 
         style={{ 
+          color: color || 'black',
           wordBreak: 'break-word',
           overflowWrap: 'anywhere',
           textWrap: 'balance',
@@ -134,6 +135,8 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
   const [editingText, setEditingText] = useState<string>('');
   const [editingFontSize, setEditingFontSize] = useState<number | undefined>(undefined);
+  const [editingFontWeight, setEditingFontWeight] = useState<'normal' | 'bold'>('bold');
+  const [editingColor, setEditingColor] = useState<string>('#000000');
 
   // Re-run scaling when window resizes
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
@@ -154,6 +157,8 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
       setSelectedBlock(index);
       setEditingText(block.translatedText);
       setEditingFontSize(block.fontSize);
+      setEditingFontWeight(block.fontWeight || 'bold');
+      setEditingColor(block.color || '#000000');
     }
   };
 
@@ -168,7 +173,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
 
   const handleSaveEdit = (index: number) => {
     if (onEditBlock) {
-      onEditBlock(index, editingText.trim(), editingFontSize);
+      onEditBlock(index, editingText.trim(), editingFontSize, editingFontWeight, editingColor);
     }
     setSelectedBlock(null);
   };
@@ -291,6 +296,37 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
                   <p className="text-[9px] text-gray-400 italic">Set to 0 for auto-scaling</p>
                 </div>
 
+                <div className="flex space-x-4 mb-3">
+                  <div className="flex flex-col space-y-1 flex-1">
+                    <label className="text-[10px] font-bold uppercase text-gray-500">Font Weight</label>
+                    <div className="flex rounded-md shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => setEditingFontWeight('normal')}
+                        className={`flex-1 px-2 py-1 text-xs font-medium border rounded-l-md ${editingFontWeight === 'normal' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                      >
+                        Normal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingFontWeight('bold')}
+                        className={`flex-1 px-2 py-1 text-xs font-bold border-t border-b border-r rounded-r-md ${editingFontWeight === 'bold' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                      >
+                        Bold
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-gray-500">Color</label>
+                    <input 
+                      type="color" 
+                      value={editingColor}
+                      onChange={(e) => setEditingColor(e.target.value)}
+                      className="h-7 w-12 p-0 border-0 rounded cursor-pointer"
+                    />
+                  </div>
+                </div>
+
                 <div className="flex justify-end space-x-2">
                   <motion.button
                     whileHover={{ scale: 1.05 }}
@@ -312,7 +348,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
               </motion.div>
             ) : (
               <>
-                <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} manualFontSize={block.fontSize} fontFamily={fontFamily} />
+                <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} manualFontSize={block.fontSize} fontFamily={fontFamily} fontWeight={block.fontWeight} color={block.color} />
                 {block.fontSize && (
                   <motion.div 
                     initial={{ scale: 0 }}
