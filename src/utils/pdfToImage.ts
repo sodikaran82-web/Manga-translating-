@@ -45,56 +45,69 @@ export async function convertPdfToImages(file: File, options?: PdfConversionOpti
   const outputFormat = options?.format || 'image/png';
   const fileExtension = outputFormat === 'image/jpeg' ? '.jpg' : '.png';
 
-  for (const i of pagesToConvert) {
-    const page = await pdf.getPage(i);
+  // Process pages in parallel batches to avoid memory issues
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < pagesToConvert.length; i += BATCH_SIZE) {
+    const batch = pagesToConvert.slice(i, i + BATCH_SIZE);
     
-    // Set scale for good quality
-    const scale = 2.0;
-    const viewport = page.getViewport({ scale });
-    
-    // Prepare canvas
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    
-    if (!context) {
-      throw new Error('Could not create canvas context');
-    }
-    
-    canvas.height = viewport.height;
-    canvas.width = viewport.width;
-    
-    // Fill with white background to prevent transparent areas becoming black in JPEG
-    context.fillStyle = 'white';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Render PDF page into canvas context
-    const renderContext: any = {
-      canvasContext: context,
-      viewport: viewport,
-      background: 'white'
-    };
-    
-    await page.render(renderContext).promise;
-    
-    // Convert canvas to blob
-    const imageFile = await new Promise<File>((resolve, reject) => {
-      canvas.toBlob((blob) => {
-        if (blob) {
-          const fileName = numPages > 1 
-            ? file.name.replace(/\.pdf$/i, `_page_${i}${fileExtension}`)
-            : file.name.replace(/\.pdf$/i, fileExtension);
-          const imgFile = new File([blob], fileName, {
-            type: outputFormat,
-            lastModified: Date.now(),
-          });
-          resolve(imgFile);
-        } else {
-          reject(new Error('Could not convert canvas to blob'));
-        }
-      }, outputFormat, outputFormat === 'image/jpeg' ? 0.92 : undefined);
+    const batchPromises = batch.map(async (pageNum) => {
+      const page = await pdf.getPage(pageNum);
+      
+      // Set scale for good quality
+      const scale = 2.0;
+      const viewport = page.getViewport({ scale });
+      
+      // Prepare canvas
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      
+      if (!context) {
+        throw new Error('Could not create canvas context');
+      }
+      
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+      
+      // Fill with white background to prevent transparent areas becoming black in JPEG
+      context.fillStyle = 'white';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Render PDF page into canvas context
+      const renderContext: any = {
+        canvasContext: context,
+        viewport: viewport,
+        background: 'white'
+      };
+      
+      await page.render(renderContext).promise;
+      
+      // Convert canvas to blob
+      return new Promise<{ file: File, pageNum: number }>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const fileName = numPages > 1 
+              ? file.name.replace(/\.pdf$/i, `_page_${pageNum}${fileExtension}`)
+              : file.name.replace(/\.pdf$/i, fileExtension);
+            const imgFile = new File([blob], fileName, {
+              type: outputFormat,
+              lastModified: Date.now(),
+            });
+            resolve({ file: imgFile, pageNum });
+          } else {
+            reject(new Error('Could not convert canvas to blob'));
+          }
+        }, outputFormat, outputFormat === 'image/jpeg' ? 0.92 : undefined);
+      });
     });
     
-    imageFiles.push(imageFile);
+    const batchResults = await Promise.all(batchPromises);
+    
+    // Sort batch results to maintain order
+    batchResults.sort((a, b) => a.pageNum - b.pageNum);
+    
+    for (const result of batchResults) {
+      imageFiles.push(result.file);
+    }
   }
   
   return imageFiles;

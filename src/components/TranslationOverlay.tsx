@@ -55,7 +55,7 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }
     
     if (availableHeight <= 0 || availableWidth <= 0) return;
 
-    let min = 4;
+    let min = 10;
     // If manualFontSize is set, use it as the maximum allowed size.
     // Otherwise, allow it to scale up to 80px to fill the bubble.
     let max = manualFontSize || 80;
@@ -82,8 +82,8 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily }
       
       // For measurement, we want to see if it fits within the width with wrapping
       // We also account for line-height by checking scrollHeight
-      const isHeightOk = textEl.scrollHeight <= availableHeight + 1; // +1 for subpixel slack
-      const isWidthOk = textEl.scrollWidth <= availableWidth + 1;
+      const isHeightOk = textEl.scrollHeight <= availableHeight + 2; // +2 for subpixel slack
+      const isWidthOk = textEl.scrollWidth <= availableWidth + 2;
 
       if (isHeightOk && isWidthOk) {
         best = mid;
