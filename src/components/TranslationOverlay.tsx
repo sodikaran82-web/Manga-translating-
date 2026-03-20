@@ -183,7 +183,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
       <img src={imageUrl} alt="Manga page" className="w-full h-auto block" />
       
       {blocks.map((block, index) => {
-        const expand = 2; // Expand bounding box slightly to cover artifacts
+        const expand = 0; // Don't expand to prevent white box from sticking out of speech bubbles
         const ymin = Math.max(0, block.box_2d[0] - expand);
         const xmin = Math.max(0, block.box_2d[1] - expand);
         const ymax = Math.min(1000, block.box_2d[2] + expand);
@@ -205,10 +205,10 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
             whileHover={{ scale: isSelected ? 1 : 1.02 }}
             className={`absolute transition-all duration-200 ease-in-out flex flex-col items-center justify-center group ${
               isSelected 
-                ? 'bg-white z-50 shadow-2xl rounded-md p-3 sm:p-4 border-2 border-indigo-600' 
+                ? 'bg-white z-50 shadow-2xl rounded-2xl p-3 sm:p-4 border-2 border-indigo-600' 
                 : isMultiSelected
-                  ? 'bg-indigo-50/95 z-20 rounded-sm ring-2 ring-indigo-500 shadow-md cursor-pointer'
-                  : 'bg-white/95 z-10 rounded-sm hover:ring-2 hover:ring-indigo-400 cursor-pointer shadow-sm'
+                  ? 'bg-indigo-50/95 z-20 rounded-2xl ring-2 ring-indigo-500 shadow-md cursor-pointer'
+                  : 'bg-white/95 z-10 rounded-2xl hover:ring-2 hover:ring-indigo-400 cursor-pointer shadow-sm'
             }`}
             style={{ 
               top, 
