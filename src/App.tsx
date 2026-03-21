@@ -39,7 +39,7 @@ export default function App() {
   const [batchMode, setBatchMode] = useState<'sequential' | 'parallel'>(() => {
     return (safeGetItem('manga_batch_mode') as 'sequential' | 'parallel') || 'parallel';
   });
-  const [batchSize, setBatchSize] = useState<number>(() => {
+  const [batchSize, setBatchSize] = useState<number | string>(() => {
     return parseInt(safeGetItem('manga_batch_size') || '5');
   });
   const [isBatchTranslating, setIsBatchTranslating] = useState(false);
@@ -169,8 +169,9 @@ export default function App() {
       const memory = await getTranslationMemory(sourceLang, targetLang);
 
       // Adjust queue delay and concurrency dynamically based on mode
+      const actualBatchSize = Math.max(1, Number(batchSize) || 1);
       translationQueue.setDelay(batchMode === 'parallel' ? 500 : 800);
-      translationQueue.setConcurrency(batchMode === 'parallel' ? batchSize : 1);
+      translationQueue.setConcurrency(batchMode === 'parallel' ? actualBatchSize : 1);
 
       // Add the request to the global queue to enforce rate limits
       const result = await translationQueue.add(() => 
@@ -257,8 +258,9 @@ export default function App() {
 
     try {
       // Set delay and concurrency based on batch mode
+      const actualBatchSize = Math.max(1, Number(batchSize) || 1);
       translationQueue.setDelay(batchMode === 'parallel' ? 500 : 800);
-      translationQueue.setConcurrency(batchMode === 'parallel' ? batchSize : 1);
+      translationQueue.setConcurrency(batchMode === 'parallel' ? actualBatchSize : 1);
 
       // Map all pending items to promises. The translationQueue will handle rate limiting and sequential execution automatically.
       const promises = pendingItems.map(async ({ item, index }) => {
@@ -1083,7 +1085,22 @@ export default function App() {
                         min="1"
                         max="10"
                         value={batchSize}
-                        onChange={(e) => setBatchSize(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '') {
+                            setBatchSize('');
+                          } else {
+                            const num = parseInt(val);
+                            if (!isNaN(num)) {
+                              setBatchSize(Math.min(10, num));
+                            }
+                          }
+                        }}
+                        onBlur={() => {
+                          if (batchSize === '' || Number(batchSize) < 1) {
+                            setBatchSize(1);
+                          }
+                        }}
                         className="w-16 text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 py-2 px-2 min-h-[44px]"
                         title="Batch Size (1-10)"
                         disabled={isBatchTranslating}
