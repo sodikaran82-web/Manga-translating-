@@ -37,10 +37,10 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
   const [batchMode, setBatchMode] = useState<'sequential' | 'parallel'>(() => {
-    return (safeGetItem('manga_batch_mode') as 'sequential' | 'parallel') || 'sequential';
+    return (safeGetItem('manga_batch_mode') as 'sequential' | 'parallel') || 'parallel';
   });
   const [batchSize, setBatchSize] = useState<number>(() => {
-    return parseInt(safeGetItem('manga_batch_size') || '2');
+    return parseInt(safeGetItem('manga_batch_size') || '5');
   });
   const [isBatchTranslating, setIsBatchTranslating] = useState(false);
   const stopBatchRef = useRef(false);
@@ -168,8 +168,9 @@ export default function App() {
       ]);
       const memory = await getTranslationMemory(sourceLang, targetLang);
 
-      // Adjust queue delay dynamically based on mode
+      // Adjust queue delay and concurrency dynamically based on mode
       translationQueue.setDelay(batchMode === 'parallel' ? 500 : 800);
+      translationQueue.setConcurrency(batchMode === 'parallel' ? batchSize : 1);
 
       // Add the request to the global queue to enforce rate limits
       const result = await translationQueue.add(() => 
@@ -255,8 +256,9 @@ export default function App() {
     stopBatchRef.current = false;
 
     try {
-      // Set delay based on batch mode
+      // Set delay and concurrency based on batch mode
       translationQueue.setDelay(batchMode === 'parallel' ? 500 : 800);
+      translationQueue.setConcurrency(batchMode === 'parallel' ? batchSize : 1);
 
       // Map all pending items to promises. The translationQueue will handle rate limiting and sequential execution automatically.
       const promises = pendingItems.map(async ({ item, index }) => {

@@ -1,14 +1,21 @@
 export class RequestQueue {
   private queue: (() => Promise<void>)[] = [];
-  private isProcessing = false;
+  private activeCount = 0;
+  private concurrency = 1;
   private delayMs: number;
 
-  constructor(delayMs = 800) {
+  constructor(delayMs = 800, concurrency = 1) {
     this.delayMs = delayMs;
+    this.concurrency = concurrency;
   }
 
   setDelay(ms: number) {
     this.delayMs = ms;
+  }
+
+  setConcurrency(count: number) {
+    this.concurrency = count;
+    this.processNext();
   }
 
   add<T>(task: () => Promise<T>): Promise<T> {
@@ -26,21 +33,30 @@ export class RequestQueue {
     });
   }
 
-  private async processNext() {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
+  private processNext() {
+    if (this.activeCount >= this.concurrency || this.queue.length === 0) return;
 
-    while (this.queue.length > 0) {
+    while (this.activeCount < this.concurrency && this.queue.length > 0) {
       const task = this.queue.shift();
       if (task) {
-        await task();
-        // Enforce rate limit delay before the next request
-        if (this.queue.length > 0) {
-          await new Promise(resolve => setTimeout(resolve, this.delayMs));
-        }
+        this.activeCount++;
+        
+        // Execute task without awaiting it here to allow parallel execution
+        (async () => {
+          try {
+            await task();
+          } finally {
+            this.activeCount--;
+            // Enforce rate limit delay before processing the next item from THIS slot
+            if (this.queue.length > 0) {
+              setTimeout(() => this.processNext(), this.delayMs);
+            } else {
+              this.processNext();
+            }
+          }
+        })();
       }
     }
-    this.isProcessing = false;
   }
 
   clear() {
