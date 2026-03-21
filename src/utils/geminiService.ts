@@ -19,6 +19,7 @@ export interface TranslationBlock {
   box_2d: [number, number, number, number]; // [ymin, xmin, ymax, xmax] normalized 0-1000
   originalText: string;
   translatedText: string;
+  bubbleShape?: 'oval' | 'rectangular' | 'spiky' | 'cloud' | 'none';
   fontSize?: number;
   fontWeight?: 'normal' | 'bold';
   color?: string;
@@ -127,14 +128,15 @@ Specific Instructions for High-Quality Manga Localization:
    - Adapt idioms, jokes, and cultural references so they make sense to a ${targetLanguage} speaker while preserving the original intent.
    - Maintain the character's voice and tone (e.g., formal, casual, aggressive, polite, slang).
    - Ensure the dialogue flows smoothly and sounds like something a native speaker would actually say in that situation.
-3. **Bounding Boxes**: The bounding box must accurately encompass the entire speech bubble to allow for proper text replacement and formatting.
+3. **Bounding Boxes (CRITICAL)**: The bounding box MUST BE STRICTLY INSIDE the speech bubble. Do NOT include the bubble's border or any background outside the bubble. The box should be a tight rectangle around the text area so that when we render an oval background over it, it stays perfectly within the original speech bubble without sticking out.
 ${customPrompt ? `4. **Additional Instructions**: ${customPrompt}` : ""}
 ${memoryString ? `\nTranslation Memory (Use these previously translated segments for consistency):\n${memoryString}` : ""}
 
-For EACH speech/thought bubble found, provide:
+For EACH speech/thought/narration bubble found, provide:
 1. "box_2d": Its bounding box as [ymin, xmin, ymax, xmax] where coordinates are normalized between 0 and 1000.
 2. "originalText": The original text in ${sourceLanguage}.
 3. "translatedText": The localized translation in ${targetLanguage}.
+4. "bubbleShape": The visual shape of the bubble containing the text. Must be one of: "oval" (round or elliptical), "rectangular" (square or box-like), "spiky" (jagged edges for shouting), "cloud" (fluffy edges for thoughts), or "none" (text without a clear border).
 
 Return ONLY a valid JSON array of objects. Be extremely thorough and prioritize translation quality.`;
 
@@ -173,20 +175,25 @@ STRICT INSTRUCTIONS:
 - Do NOT split sentences awkwardly.
 - Keep phrases together for smooth reading.
 
-4. STYLE:
+4. BOUNDING BOXES (CRITICAL):
+- Bounding boxes MUST be strictly inside the speech bubbles.
+- Do NOT include the bubble's border or any background outside the bubble.
+- The box should be a tight rectangle around the text area so that when we render an oval background over it, it stays perfectly within the original speech bubble without sticking out.
+
+5. STYLE:
 - Maintain original tone (casual, emotional, funny, etc.)
 - Translate naturally into ${targetLanguage}.
 - Keep dialogues short and punchy.
 
-5. SPECIAL EFFECT TEXT:
+6. SPECIAL EFFECT TEXT:
 - For sound effects (SFX), use slightly stylized or ALL CAPS text.
 - Keep them visually distinct from dialogue.
 
-6. CONSISTENCY:
+7. CONSISTENCY:
 - Same character → same speaking style
 - Maintain uniform formatting across all panels
 
-7. OUTPUT FORMAT:
+8. OUTPUT FORMAT:
 Return clean, well-formatted text ready for manga bubbles.
 No extra explanations.
 
@@ -207,8 +214,12 @@ Optimize output for mobile reading (clear, bold, properly spaced text).`,
                 },
                 originalText: { type: Type.STRING },
                 translatedText: { type: Type.STRING },
+                bubbleShape: { 
+                  type: Type.STRING,
+                  description: "Visual shape of the bubble: oval, rectangular, spiky, cloud, or none"
+                },
               },
-              required: ["box_2d", "originalText", "translatedText"],
+              required: ["box_2d", "originalText", "translatedText", "bubbleShape"],
             },
           },
         }

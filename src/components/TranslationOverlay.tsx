@@ -14,7 +14,7 @@ interface TranslationOverlayProps {
   onToggleBlockSelection?: (index: number) => void;
 }
 
-function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily, fontWeight, color }: { text: string, originalText: string, isSelected: boolean, manualFontSize?: number, fontFamily?: string, fontWeight?: 'normal' | 'bold', color?: string }) {
+function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily, fontWeight, color, bubbleShape }: { text: string, originalText: string, isSelected: boolean, manualFontSize?: number, fontFamily?: string, fontWeight?: 'normal' | 'bold', color?: string, bubbleShape?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLParagraphElement>(null);
   const [fontSize, setFontSize] = useState(manualFontSize || 14);
@@ -49,13 +49,14 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily, 
 
     // Speech bubbles are often oval/elliptical. The bounding box is a rectangle.
     // To prevent text from overflowing the curved edges of the bubble, we constrain
-    // the text to a smaller inner rectangle (e.g., 90% of the bounding box).
-    const availableHeight = dimensions.height * 0.90;
-    const availableWidth = dimensions.width * 0.90;
+    // the text to a smaller inner rectangle.
+    const constraintFactor = (bubbleShape === 'rectangular' || bubbleShape === 'none') ? 0.95 : 0.85;
+    const availableHeight = dimensions.height * constraintFactor;
+    const availableWidth = dimensions.width * constraintFactor;
     
     if (availableHeight <= 0 || availableWidth <= 0) return;
 
-    let min = 10;
+    let min = 4;
     // If manualFontSize is set, use it as the maximum allowed size.
     // Otherwise, allow it to scale up to 80px to fill the bubble.
     let max = manualFontSize || 80;
@@ -65,15 +66,9 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily, 
     const originalMaxWidth = textEl.style.maxWidth;
     const originalMaxHeight = textEl.style.maxHeight;
     const originalFontSize = textEl.style.fontSize;
-    const originalWordBreak = textEl.style.wordBreak;
-    const originalOverflowWrap = textEl.style.overflowWrap;
     
     textEl.style.maxWidth = `${availableWidth}px`;
     textEl.style.maxHeight = 'none';
-    // Disable word breaking during measurement so that long words force the font size to scale down
-    // instead of breaking in the middle of the word, which improves readability.
-    textEl.style.wordBreak = 'normal';
-    textEl.style.overflowWrap = 'normal';
 
     // Binary search for best font size
     while (min <= max) {
@@ -97,11 +92,11 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily, 
     textEl.style.maxWidth = originalMaxWidth;
     textEl.style.maxHeight = originalMaxHeight;
     textEl.style.fontSize = originalFontSize;
-    textEl.style.wordBreak = originalWordBreak;
-    textEl.style.overflowWrap = originalOverflowWrap;
     
     setFontSize(best);
-  }, [text, originalText, isSelected, manualFontSize, dimensions.width, dimensions.height]);
+  }, [text, originalText, isSelected, manualFontSize, dimensions.width, dimensions.height, bubbleShape]);
+
+  const constraintFactorStr = (bubbleShape === 'rectangular' || bubbleShape === 'none') ? '95%' : '85%';
 
   return (
     <div 
@@ -120,8 +115,8 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily, 
           letterSpacing: '-0.02em',
           fontSize: `${fontSize}px`,
           fontFamily: fontFamily || '"Comic Neue", Kalam, sans-serif',
-          maxWidth: isSelected ? '100%' : '90%',
-          maxHeight: isSelected ? '100%' : '90%',
+          maxWidth: isSelected ? '100%' : constraintFactorStr,
+          maxHeight: '100%',
           textShadow: isSelected ? 'none' : '0px 0px 2px rgba(255,255,255,0.8)'
         }}
       >
@@ -183,7 +178,9 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
       <img src={imageUrl} alt="Manga page" className="w-full h-auto block" />
       
       {blocks.map((block, index) => {
-        const expand = 0; // Don't expand to prevent white box from sticking out of speech bubbles
+        // Expand the bounding box slightly to cover the original bubble's padding
+        // This gives more room for the translated text and prevents clipping
+        const expand = block.bubbleShape === 'rectangular' || block.bubbleShape === 'none' ? 10 : 25; 
         const ymin = Math.max(0, block.box_2d[0] - expand);
         const xmin = Math.max(0, block.box_2d[1] - expand);
         const ymax = Math.min(1000, block.box_2d[2] + expand);
@@ -197,6 +194,15 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
         const isSelected = selectedBlock === index;
         const isMultiSelected = selectedBlockIndices.includes(index);
 
+        let shapeClass = 'rounded-[50%]'; // Default to oval
+        if (block.bubbleShape === 'rectangular' || block.bubbleShape === 'none') {
+          shapeClass = 'rounded-md';
+        } else if (block.bubbleShape === 'spiky') {
+          shapeClass = 'rounded-xl';
+        } else if (block.bubbleShape === 'cloud') {
+          shapeClass = 'rounded-[40%]';
+        }
+
         return (
           <motion.div
             key={`${index}-${windowWidth}`}
@@ -207,8 +213,8 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
               isSelected 
                 ? 'bg-white z-50 shadow-2xl rounded-2xl p-3 sm:p-4 border-2 border-indigo-600' 
                 : isMultiSelected
-                  ? 'bg-indigo-50/95 z-20 rounded-2xl ring-2 ring-indigo-500 shadow-md cursor-pointer'
-                  : 'bg-white/95 z-10 rounded-2xl hover:ring-2 hover:ring-indigo-400 cursor-pointer shadow-sm'
+                  ? 'bg-indigo-50 z-20 ' + shapeClass + ' ring-2 ring-indigo-500 shadow-md cursor-pointer'
+                  : 'bg-white z-10 ' + shapeClass + ' hover:ring-2 hover:ring-indigo-400 cursor-pointer shadow-sm'
             }`}
             style={{ 
               top, 
@@ -348,7 +354,7 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
               </motion.div>
             ) : (
               <>
-                <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} manualFontSize={block.fontSize} fontFamily={fontFamily} fontWeight={block.fontWeight} color={block.color} />
+                <AutoText text={block.translatedText} originalText={block.originalText} isSelected={isSelected} manualFontSize={block.fontSize} fontFamily={fontFamily} fontWeight={block.fontWeight} color={block.color} bubbleShape={block.bubbleShape} />
                 {block.fontSize && (
                   <motion.div 
                     initial={{ scale: 0 }}
