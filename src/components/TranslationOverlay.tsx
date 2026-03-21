@@ -50,7 +50,7 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily, 
     // Speech bubbles are often oval/elliptical. The bounding box is a rectangle.
     // To prevent text from overflowing the curved edges of the bubble, we constrain
     // the text to a smaller inner rectangle.
-    const constraintFactor = (bubbleShape === 'rectangular' || bubbleShape === 'none') ? 0.95 : 0.85;
+    const constraintFactor = (bubbleShape === 'rectangular' || bubbleShape === 'none') ? 0.90 : 0.70;
     const availableHeight = dimensions.height * constraintFactor;
     const availableWidth = dimensions.width * constraintFactor;
     
@@ -96,7 +96,7 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily, 
     setFontSize(best);
   }, [text, originalText, isSelected, manualFontSize, dimensions.width, dimensions.height, bubbleShape]);
 
-  const constraintFactorStr = (bubbleShape === 'rectangular' || bubbleShape === 'none') ? '95%' : '85%';
+  const constraintFactorStr = (bubbleShape === 'rectangular' || bubbleShape === 'none') ? '90%' : '70%';
 
   return (
     <div 
@@ -108,16 +108,15 @@ function AutoText({ text, originalText, isSelected, manualFontSize, fontFamily, 
         className={`text-center m-0 p-0 ${fontWeight === 'normal' ? 'font-normal' : 'font-bold'}`} 
         style={{ 
           color: color || 'black',
-          wordBreak: 'break-word',
-          overflowWrap: 'anywhere',
+          wordBreak: 'normal',
+          overflowWrap: 'normal',
           textWrap: 'balance',
-          lineHeight: '1.1',
-          letterSpacing: '-0.02em',
+          lineHeight: '1.3',
+          letterSpacing: '0.3px',
           fontSize: `${fontSize}px`,
           fontFamily: fontFamily || '"Comic Neue", Kalam, sans-serif',
           maxWidth: isSelected ? '100%' : constraintFactorStr,
           maxHeight: '100%',
-          textShadow: isSelected ? 'none' : '0px 0px 2px rgba(255,255,255,0.8)'
         }}
       >
         {text}
@@ -213,8 +212,8 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
               isSelected 
                 ? 'bg-white z-50 shadow-2xl rounded-2xl p-3 sm:p-4 border-2 border-indigo-600' 
                 : isMultiSelected
-                  ? 'bg-indigo-50 z-20 ' + shapeClass + ' ring-2 ring-indigo-500 shadow-md cursor-pointer'
-                  : 'bg-white z-10 ' + shapeClass + ' hover:ring-2 hover:ring-indigo-400 cursor-pointer shadow-sm'
+                  ? 'bg-indigo-50 z-20 ' + shapeClass + ' ring-2 ring-indigo-500 cursor-pointer'
+                  : 'bg-white z-10 ' + shapeClass + ' hover:ring-2 hover:ring-indigo-400 cursor-pointer'
             }`}
             style={{ 
               top, 

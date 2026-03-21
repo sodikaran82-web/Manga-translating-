@@ -472,7 +472,7 @@ export default function App() {
     item.blocks.forEach((block) => {
       if (!block.translatedText || block.translatedText.trim() === '') return;
 
-      const expand = 2;
+      const expand = block.bubbleShape === 'rectangular' || block.bubbleShape === 'none' ? 10 : 25;
       const ymin = Math.max(0, block.box_2d[0] - expand);
       const xmin = Math.max(0, block.box_2d[1] - expand);
       const ymax = Math.min(1000, block.box_2d[2] + expand);
@@ -487,10 +487,11 @@ export default function App() {
       const radius = 2; // Match rounded-sm
       
       let lines: string[] = [];
-      // Use 5% padding on each side to constrain text to 90% of the bounding box,
-      // matching the HTML overlay and keeping text inside oval speech bubbles.
-      const paddingX = w * 0.05;
-      const paddingY = h * 0.05;
+      // Use 5% padding on each side for rectangular, 15% for oval to keep text inside
+      const paddingFactorX = block.bubbleShape === 'rectangular' || block.bubbleShape === 'none' ? 0.05 : 0.15;
+      const paddingFactorY = block.bubbleShape === 'rectangular' || block.bubbleShape === 'none' ? 0.05 : 0.15;
+      const paddingX = w * paddingFactorX;
+      const paddingY = h * paddingFactorY;
       
       const comicFontFamily = fontFamily || '"Comic Neue", Kalam, sans-serif';
       
@@ -580,7 +581,8 @@ export default function App() {
         if (mid < low) break;
         
         ctx.font = `bold ${mid}px ${comicFontFamily}`;
-        const currentLineHeight = mid * 1.1;
+        (ctx as any).letterSpacing = '0.3px';
+        const currentLineHeight = mid * 1.3;
         
         const targetWidth = w - paddingX * 2;
         const currentLines = wrapTextBalanced(ctx, block.translatedText, targetWidth);
@@ -602,14 +604,16 @@ export default function App() {
       
       fontSize = bestFontSize;
       lines = bestLines;
-      lineHeight = fontSize * 1.1;
+      lineHeight = fontSize * 1.3;
       ctx.font = `bold ${fontSize}px ${comicFontFamily}`;
+      (ctx as any).letterSpacing = '0.3px';
       
       // If even minCanvasFontSize doesn't fit, we need to expand the box
       if (lines.length === 0) {
          fontSize = minCanvasFontSize;
          ctx.font = `bold ${fontSize}px ${comicFontFamily}`;
-         lineHeight = fontSize * 1.1;
+         (ctx as any).letterSpacing = '0.3px';
+         lineHeight = fontSize * 1.3;
          lines = wrapTextBalanced(ctx, block.translatedText, w - paddingX * 2);
          
          const totalHeight = lines.length * lineHeight;
@@ -633,47 +637,38 @@ export default function App() {
       // Draw a white background to cover original text
       ctx.beginPath();
       
-      // Draw rounded rect
       const bgX = drawX;
       const bgY = drawY;
       const bgW = finalW;
       const bgH = finalH;
-      ctx.moveTo(bgX + radius, bgY);
-      ctx.lineTo(bgX + bgW - radius, bgY);
-      ctx.quadraticCurveTo(bgX + bgW, bgY, bgX + bgW, bgY + radius);
-      ctx.lineTo(bgX + bgW, bgY + bgH - radius);
-      ctx.quadraticCurveTo(bgX + bgW, bgY + bgH, bgX + bgW - radius, bgY + bgH);
-      ctx.lineTo(bgX + radius, bgY + bgH);
-      ctx.quadraticCurveTo(bgX, bgY + bgH, bgX, bgY + bgH - radius);
-      ctx.lineTo(bgX, bgY + radius);
-      ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
+      
+      if (block.bubbleShape === 'oval' || block.bubbleShape === 'cloud') {
+        // Draw ellipse
+        ctx.ellipse(centerX, centerY, bgW / 2, bgH / 2, 0, 0, 2 * Math.PI);
+      } else {
+        // Draw rounded rect
+        ctx.moveTo(bgX + radius, bgY);
+        ctx.lineTo(bgX + bgW - radius, bgY);
+        ctx.quadraticCurveTo(bgX + bgW, bgY, bgX + bgW, bgY + radius);
+        ctx.lineTo(bgX + bgW, bgY + bgH - radius);
+        ctx.quadraticCurveTo(bgX + bgW, bgY + bgH, bgX + bgW - radius, bgY + bgH);
+        ctx.lineTo(bgX + radius, bgY + bgH);
+        ctx.quadraticCurveTo(bgX, bgY + bgH, bgX, bgY + bgH - radius);
+        ctx.lineTo(bgX, bgY + radius);
+        ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
+      }
       ctx.closePath();
       
-      // Match bg-white/95 and shadow-sm from TranslationOverlay
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.05)';
-      ctx.shadowBlur = 2;
-      ctx.shadowOffsetY = 1;
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.fillStyle = '#FFFFFF';
       ctx.fill();
       
-      // Reset shadow for text
-      ctx.shadowColor = 'transparent';
-      ctx.shadowBlur = 0;
-      ctx.shadowOffsetY = 0;
-
-      ctx.fillStyle = '#000000'; // Match text-black
+      ctx.fillStyle = block.color || '#000000';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       const startY = drawY + finalH / 2 - ((lines.length - 1) * lineHeight) / 2;
       
       lines.forEach((lineText, i) => {
-        // Match textShadow: '0px 0px 2px rgba(255,255,255,0.8)'
-        ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
-        ctx.shadowBlur = 2;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-        
         ctx.fillText(lineText.trim(), drawX + finalW / 2, startY + i * lineHeight);
       });
       
