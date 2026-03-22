@@ -10,6 +10,7 @@ import { ImageUploader } from './components/ImageUploader';
 import { TranslationOverlay } from './components/TranslationOverlay';
 import { HistoryModal } from './components/HistoryModal';
 import { SettingsModal } from './components/SettingsModal';
+import { AdSense } from './components/AdSense';
 import { translateMangaPage, translateImage, translateBatch, TranslationBlock, TokenUsage, generateImageHash } from './utils/geminiService';
 import { saveToHistory, HistoryItem } from './utils/historyService';
 import { getTranslationMemory, saveToTranslationMemory, saveMultipleToTranslationMemory, clearTranslationMemory } from './utils/translationMemoryService';
@@ -905,6 +906,8 @@ export default function App() {
       </AnimatePresence>
 
       <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+        <AdSense key={`ad-top-${currentIndex}-${items.length}-${currentItem?.status || 'none'}`} adSlot="1029384756" adFormat="auto" className="mb-8" />
+        
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1283,6 +1286,10 @@ export default function App() {
                       )}
                     </div>
                     
+                    <div className="my-8">
+                      <AdSense key={`ad-mid-${currentIndex}-${items.length}-${currentItem?.status || 'none'}`} adSlot="8493028192" adFormat="fluid" className="w-full" />
+                    </div>
+
                     {currentItem.blocks.length > 0 ? (
                       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
                         <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
@@ -1319,6 +1326,8 @@ export default function App() {
             </div>
           </div>
         )}
+        
+        <AdSense key={`ad-bottom-${currentIndex}-${items.length}-${currentItem?.status || 'none'}`} adSlot="5647382910" adFormat="auto" className="mt-8" />
       </main>
 
       {/* Multi-select Floating Action Bar */}
