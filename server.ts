@@ -20,6 +20,12 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Direct route for ads.txt to ensure it's always served correctly
+  app.get(["/ads.txt", "/ads.text"], (req, res) => {
+    res.type("text/plain");
+    res.send("google.com, pub-7292158270704128, DIRECT, f08c47fec0942fa0");
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
