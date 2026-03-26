@@ -128,7 +128,7 @@ Specific Instructions for High-Quality Manga Localization:
    - Adapt idioms, jokes, and cultural references so they make sense to a ${targetLanguage} speaker while preserving the original intent.
    - Maintain the character's voice and tone (e.g., formal, casual, aggressive, polite, slang).
    - Ensure the dialogue flows smoothly and sounds like something a native speaker would actually say in that situation.
-3. **Bounding Boxes (CRITICAL)**: The bounding box MUST BE STRICTLY INSIDE the speech bubble. Do NOT include the bubble's border or any background outside the bubble. The box should be a tight rectangle around the text area so that when we render an oval background over it, it stays perfectly within the original speech bubble without sticking out.
+3. **Bounding Boxes (CRITICAL)**: The bounding box MUST BE STRICTLY INSIDE the speech bubble. Do NOT include the bubble's border, and ABSOLUTELY DO NOT include the bubble's tail/pointer in the bounding box. The tail must remain visible so readers know who is speaking. The box should be a tight rectangle around the text area only.
 ${customPrompt ? `4. **Additional Instructions**: ${customPrompt}` : ""}
 ${memoryString ? `\nTranslation Memory (Use these previously translated segments for consistency):\n${memoryString}` : ""}
 
@@ -178,7 +178,8 @@ STRICT INSTRUCTIONS:
 4. BOUNDING BOXES (CRITICAL):
 - Bounding boxes MUST be strictly inside the speech bubbles.
 - Do NOT include the bubble's border or any background outside the bubble.
-- The box should be a tight rectangle around the text area so that when we render an oval background over it, it stays perfectly within the original speech bubble without sticking out.
+- EXTREMELY IMPORTANT: Do NOT include the speech bubble's tail/pointer in the bounding box. The tail must remain visible so readers know who is speaking.
+- The box should be a tight rectangle around the text area only.
 
 5. STYLE:
 - Maintain original tone (casual, emotional, funny, etc.)
@@ -226,6 +227,9 @@ Optimize output for mobile reading (clear, bold, properly spaced text).`,
       });
 
       let jsonStr = response.text?.trim() || "[]";
+      const totalPromptTokens = response.usageMetadata?.promptTokenCount || 0;
+      const totalCandidatesTokens = response.usageMetadata?.candidatesTokenCount || 0;
+
       const match = jsonStr.match(/\[\s*\{[\s\S]*\}\s*\]/);
       if (match) jsonStr = match[0];
       else jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -239,9 +243,6 @@ Optimize output for mobile reading (clear, bold, properly spaced text).`,
       }
 
       console.log(`[translateMangaPage] Found and translated ${extractedBlocks.length} bubbles.`);
-
-      const totalPromptTokens = response.usageMetadata?.promptTokenCount || 0;
-      const totalCandidatesTokens = response.usageMetadata?.candidatesTokenCount || 0;
 
       const usage = {
         promptTokens: totalPromptTokens,

@@ -179,7 +179,8 @@ export function TranslationOverlay({ imageUrl, blocks, onDeleteBlock, onEditBloc
       {blocks.map((block, index) => {
         // Expand the bounding box slightly to cover the original bubble's padding
         // This gives more room for the translated text and prevents clipping
-        const expand = block.bubbleShape === 'rectangular' || block.bubbleShape === 'none' ? 10 : 25; 
+        // Reduced expansion to prevent covering the speech bubble's tail/pointer
+        const expand = block.bubbleShape === 'rectangular' || block.bubbleShape === 'none' ? 3 : 8; 
         const ymin = Math.max(0, block.box_2d[0] - expand);
         const xmin = Math.max(0, block.box_2d[1] - expand);
         const ymax = Math.min(1000, block.box_2d[2] + expand);
