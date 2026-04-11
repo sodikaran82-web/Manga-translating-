@@ -1,5 +1,0 @@
-{
-  "name": "Manga Translator",
-  "description": "A mobile-friendly app to translate manga pages using Gemini.",
-  "requestFramePermissions": ["camera"]
-}
