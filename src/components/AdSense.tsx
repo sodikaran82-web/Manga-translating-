@@ -53,4 +53,3 @@ export const AdSense: React.FC<AdSenseProps> = ({
     </div>
   );
 };
-

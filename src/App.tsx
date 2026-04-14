@@ -509,4 +509,1008 @@ export default function App() {
       let finalH = h;
 
       // Helper function for balanced text wrapping (mimics text-wrap: balance)
-      const wrapTextBalanced = (ctx: CanvasRenderingContext2D, tex
+      const wrapTextBalanced = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
+        const words = text.trim().split(/\s+/);
+        if (words.length === 0 || (words.length === 1 && words[0] === '')) return [];
+        if (words.length === 1) return words;
+
+        let greedyLines: string[] = [];
+        let line = '';
+        for (let i = 0; i < words.length; i++) {
+          const testLine = line + (line ? ' ' : '') + words[i];
+          if (ctx.measureText(testLine).width > maxWidth && i > 0) {
+            greedyLines.push(line);
+            line = words[i];
+          } else {
+            line = testLine;
+          }
+        }
+        if (line) greedyLines.push(line);
+
+        const numLines = greedyLines.length;
+        if (numLines <= 1) return greedyLines;
+
+        let low = 0;
+        let high = maxWidth;
+        let bestLines = greedyLines;
+
+        let minWordWidth = 0;
+        for (const word of words) {
+          minWordWidth = Math.max(minWordWidth, ctx.measureText(word).width);
+        }
+        low = minWordWidth;
+
+        while (low <= high) {
+          const mid = (low + high) / 2;
+          let currentLines: string[] = [];
+          let currentLine = '';
+          let valid = true;
+          
+          for (let i = 0; i < words.length; i++) {
+            const testLine = currentLine + (currentLine ? ' ' : '') + words[i];
+            if (ctx.measureText(testLine).width > mid) {
+              if (!currentLine) {
+                valid = false;
+                break;
+              }
+              currentLines.push(currentLine);
+              currentLine = words[i];
+            } else {
+              currentLine = testLine;
+            }
+          }
+          if (currentLine) currentLines.push(currentLine);
+
+          if (valid && currentLines.length <= numLines) {
+            bestLines = currentLines;
+            high = mid - 0.5;
+          } else {
+            low = mid + 0.5;
+          }
+        }
+        return bestLines;
+      };
+      
+      // Binary search for the best font size
+      let low = minCanvasFontSize;
+      let high = maxCanvasFontSize;
+      let bestFontSize = minCanvasFontSize;
+      let bestLines: string[] = [];
+      
+      while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        if (mid < low) break;
+        
+        ctx.font = `bold ${mid}px ${comicFontFamily}`;
+        (ctx as any).letterSpacing = '0.3px';
+        const currentLineHeight = mid * 1.3;
+        
+        const targetWidth = w - paddingX * 2;
+        const currentLines = wrapTextBalanced(ctx, block.translatedText, targetWidth);
+        
+        const totalHeight = currentLines.length * currentLineHeight;
+        let maxLineWidth = 0;
+        currentLines.forEach(l => {
+            maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
+        });
+
+        if (totalHeight <= h - paddingY * 2 && maxLineWidth <= w - paddingX * 2) {
+          bestFontSize = mid;
+          bestLines = currentLines;
+          low = mid + 1;
+        } else {
+          high = mid - 1;
+        }
+      }
+      
+      fontSize = bestFontSize;
+      lines = bestLines;
+      lineHeight = fontSize * 1.3;
+      ctx.font = `bold ${fontSize}px ${comicFontFamily}`;
+      (ctx as any).letterSpacing = '0.3px';
+      
+      // If even minCanvasFontSize doesn't fit, we need to expand the box
+      if (lines.length === 0) {
+         fontSize = minCanvasFontSize;
+         ctx.font = `bold ${fontSize}px ${comicFontFamily}`;
+         (ctx as any).letterSpacing = '0.3px';
+         lineHeight = fontSize * 1.3;
+         lines = wrapTextBalanced(ctx, block.translatedText, w - paddingX * 2);
+         
+         const totalHeight = lines.length * lineHeight;
+         let maxLineWidth = 0;
+         lines.forEach(l => {
+             maxLineWidth = Math.max(maxLineWidth, ctx.measureText(l).width);
+         });
+         // Expand finalW and finalH slightly to ensure text is readable
+         finalW = Math.max(w, maxLineWidth + paddingX * 2);
+         finalH = Math.max(h, totalHeight + paddingY * 2);
+      }
+
+      // Center the expanded box around the original center
+      const centerX = x + w / 2;
+      const centerY = y + h / 2;
+      const drawX = centerX - finalW / 2;
+      const drawY = centerY - finalH / 2;
+
+      ctx.save();
+      
+      // Draw a white background to cover original text
+      ctx.beginPath();
+      
+      const bgX = drawX;
+      const bgY = drawY;
+      const bgW = finalW;
+      const bgH = finalH;
+      
+      if (block.bubbleShape === 'oval' || block.bubbleShape === 'cloud') {
+        // Draw ellipse
+        ctx.ellipse(centerX, centerY, bgW / 2, bgH / 2, 0, 0, 2 * Math.PI);
+      } else {
+        // Draw rounded rect
+        ctx.moveTo(bgX + radius, bgY);
+        ctx.lineTo(bgX + bgW - radius, bgY);
+        ctx.quadraticCurveTo(bgX + bgW, bgY, bgX + bgW, bgY + radius);
+        ctx.lineTo(bgX + bgW, bgY + bgH - radius);
+        ctx.quadraticCurveTo(bgX + bgW, bgY + bgH, bgX + bgW - radius, bgY + bgH);
+        ctx.lineTo(bgX + radius, bgY + bgH);
+        ctx.quadraticCurveTo(bgX, bgY + bgH, bgX, bgY + bgH - radius);
+        ctx.lineTo(bgX, bgY + radius);
+        ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
+      }
+      ctx.closePath();
+      
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fill();
+      
+      ctx.fillStyle = block.color || '#000000';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      const startY = drawY + finalH / 2 - ((lines.length - 1) * lineHeight) / 2;
+      
+      lines.forEach((lineText, i) => {
+        ctx.fillText(lineText.trim(), drawX + finalW / 2, startY + i * lineHeight);
+      });
+      
+      ctx.restore();
+    });
+
+    return canvas;
+  };
+
+  const handleDownload = async () => {
+    const currentItem = items[currentIndex];
+    const canvas = await generateTranslatedCanvas(currentItem);
+    if (!canvas) return;
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+    
+    // Create PDF
+    const pdf = new jsPDF({
+      orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+      unit: 'px',
+      format: [canvas.width, canvas.height]
+    });
+    
+    pdf.addImage(dataUrl, 'JPEG', 0, 0, canvas.width, canvas.height);
+    pdf.save(`translated_manga_${currentIndex + 1}.pdf`);
+  };
+
+  const handleDownloadAll = async () => {
+    const doneItems = items.filter(item => item.status === 'done' && item.blocks);
+    if (doneItems.length === 0) return;
+
+    setIsDownloadingAll(true);
+    try {
+      // Create a single PDF with all pages
+      let pdf: jsPDF | null = null;
+
+      for (let i = 0; i < doneItems.length; i++) {
+        const item = doneItems[i];
+        const canvas = await generateTranslatedCanvas(item);
+        if (!canvas) continue;
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        
+        if (!pdf) {
+          pdf = new jsPDF({
+            orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+            unit: 'px',
+            format: [canvas.width, canvas.height]
+          });
+          pdf.addImage(dataUrl, 'JPEG', 0, 0, canvas.width, canvas.height);
+        } else {
+          pdf.addPage([canvas.width, canvas.height], canvas.width > canvas.height ? 'landscape' : 'portrait');
+          pdf.addImage(dataUrl, 'JPEG', 0, 0, canvas.width, canvas.height);
+        }
+      }
+
+      if (pdf) {
+        pdf.save('translated_manga_pages.pdf');
+      }
+    } catch (error) {
+      console.error("Failed to download all:", error);
+    } finally {
+      setIsDownloadingAll(false);
+    }
+  };
+
+  const handleSelectHistoryItem = (historyItem: HistoryItem) => {
+    const newItem: TranslationItem = {
+      id: historyItem.id,
+      imageUrl: historyItem.imageUrl,
+      status: 'done',
+      blocks: historyItem.blocks,
+      usage: historyItem.usage,
+    };
+    
+    setItems(prev => [...prev, newItem]);
+    setCurrentIndex(items.length); // Will be the last item
+    setSourceLang(historyItem.sourceLang);
+    setTargetLang(historyItem.targetLang);
+    setIsHistoryOpen(false);
+  };
+
+  const handleClearMemory = async () => {
+    await clearTranslationMemory(sourceLang, targetLang);
+    setShowConfirmClearMemory(false);
+    notify.success("Translation memory cleared");
+  };
+
+  const currentItem = items[currentIndex];
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-50 text-gray-900 font-sans pb-12"
+    >
+      <Toaster position="top-right" richColors />
+      <motion.header 
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="bg-white border-b border-gray-200 sticky top-0 z-50"
+      >
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center space-x-2 flex-shrink-0">
+            <div className="bg-indigo-100 p-1.5 sm:p-2 rounded-lg">
+              <Languages className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-600" />
+            </div>
+            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-gray-900 hidden xs:block sm:block">Manga Translator</h1>
+          </div>
+          <div className="flex items-center space-x-0.5 sm:space-x-2 overflow-x-auto no-scrollbar">
+            {items.some(item => item.status === 'done') && (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleDownloadAll}
+                disabled={isDownloadingAll}
+                className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
+                aria-label="Download All"
+                title="Download All Translated Pages (PDF)"
+              >
+                {isDownloadingAll ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Archive className="w-5 h-5" />
+                )}
+              </motion.button>
+            )}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setIsHistoryOpen(true)}
+              className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
+              aria-label="History"
+              title="View Translation History"
+            >
+              <Clock className="w-5 h-5" />
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowConfirmClearMemory(true)}
+              className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
+              aria-label="Clear Translation Memory"
+              title="Clear Translation Memory for current language pair"
+            >
+              <Database className="w-5 h-5" />
+            </motion.button>
+            {items.length > 0 && (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleReset}
+                className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
+                aria-label="Reset"
+                title="Clear Current Session"
+              >
+                <RefreshCw className="w-5 h-5" />
+              </motion.button>
+            )}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
+              aria-label="Settings"
+              title="Settings & API Key"
+            >
+              <Settings className="w-5 h-5" />
+            </motion.button>
+          </div>
+        </div>
+      </motion.header>
+
+      <HistoryModal 
+        isOpen={isHistoryOpen} 
+        onClose={() => setIsHistoryOpen(false)} 
+        onSelectHistoryItem={handleSelectHistoryItem} 
+      />
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        selectedModel={selectedModel}
+        onModelChange={(model) => {
+          setSelectedModel(model);
+        }}
+        autoDownload={autoDownload}
+        onAutoDownloadChange={(val) => {
+          setAutoDownload(val);
+        }}
+        notificationsEnabled={notificationsEnabled}
+        onNotificationsEnabledChange={(val) => {
+          setNotificationsEnabled(val);
+        }}
+        temperature={temperature}
+        onTemperatureChange={(val) => {
+          setTemperature(val);
+        }}
+      />
+
+      <AnimatePresence>
+        {showConfirmClearMemory && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 flex flex-col space-y-4"
+            >
+              <h3 className="text-lg font-semibold text-gray-900">Clear Translation Memory</h3>
+              <p className="text-gray-600">Are you sure you want to clear the translation memory for {sourceLang} to {targetLang}? This action cannot be undone.</p>
+              <div className="flex justify-end space-x-3 pt-2">
+                <button
+                  onClick={() => setShowConfirmClearMemory(false)}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors min-h-[44px]"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleClearMemory}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors min-h-[44px]"
+                >
+                  Clear Memory
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+        <AdSense key={`ad-top-${currentIndex}-${items.length}-${currentItem?.status || 'none'}`} adSlot="1029384756" adFormat="auto" className="mb-8" />
+        
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8 flex flex-col gap-4 bg-white p-4 rounded-2xl shadow-sm border border-gray-200"
+        >
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <div className="flex flex-col w-full sm:w-auto">
+              <label className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wider">From</label>
+              <select 
+                value={sourceLang}
+                onChange={(e) => setSourceLang(e.target.value)}
+                className="bg-gray-50 border border-gray-200 text-gray-900 text-base sm:text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-3 sm:p-2.5 min-h-[44px] transition-all hover:border-indigo-300"
+              >
+                <option value="Auto-detect">Auto-detect</option>
+                <option value="Japanese">Japanese</option>
+                <option value="Korean">Korean</option>
+                <option value="Chinese (Simplified)">Chinese (Simplified)</option>
+                <option value="Chinese (Traditional)">Chinese (Traditional)</option>
+                <option value="English">English</option>
+                <option value="Spanish">Spanish</option>
+                <option value="French">French</option>
+                <option value="German">German</option>
+                <option value="Italian">Italian</option>
+                <option value="Portuguese">Portuguese</option>
+                <option value="Russian">Russian</option>
+                <option value="Arabic">Arabic</option>
+                <option value="Hindi">Hindi</option>
+              </select>
+            </div>
+            
+            <ArrowRight className="w-5 h-5 text-gray-400 hidden sm:block mt-5" />
+            
+            <div className="flex flex-col w-full sm:w-auto">
+              <label className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wider">To</label>
+              <select 
+                value={targetLang}
+                onChange={(e) => setTargetLang(e.target.value)}
+                className="bg-gray-50 border border-gray-200 text-gray-900 text-base sm:text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-3 sm:p-2.5 min-h-[44px] transition-all hover:border-indigo-300"
+              >
+                <option value="English">English</option>
+                <option value="Hindi">Hindi</option>
+                <option value="Hinglish">Hinglish</option>
+                <option value="Spanish">Spanish</option>
+                <option value="French">French</option>
+                <option value="German">German</option>
+                <option value="Italian">Italian</option>
+                <option value="Portuguese">Portuguese</option>
+                <option value="Russian">Russian</option>
+                <option value="Japanese">Japanese</option>
+                <option value="Korean">Korean</option>
+                <option value="Chinese (Simplified)">Chinese (Simplified)</option>
+                <option value="Chinese (Traditional)">Chinese (Traditional)</option>
+                <option value="Arabic">Arabic</option>
+                <option value="Bengali">Bengali</option>
+                <option value="Tamil">Tamil</option>
+                <option value="Telugu">Telugu</option>
+                <option value="Marathi">Marathi</option>
+                <option value="Indonesian">Indonesian</option>
+                <option value="Vietnamese">Vietnamese</option>
+                <option value="Thai">Thai</option>
+              </select>
+            </div>
+            
+            <div className="flex flex-col w-full sm:w-auto">
+              <label className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wider">Font Style</label>
+              <select 
+                value={fontFamily}
+                onChange={(e) => setFontFamily(e.target.value)}
+                className="bg-gray-50 border border-gray-200 text-gray-900 text-base sm:text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-3 sm:p-2.5 min-h-[44px] transition-all hover:border-indigo-300"
+              >
+                <option value='"Comic Neue", Kalam, sans-serif'>Comic (Default)</option>
+                <option value='"Anime Ace", "Anime Ace 2.0 BB", "Comic Sans MS", sans-serif'>Anime Ace</option>
+                <option value='"Noto Sans", sans-serif'>Noto Sans</option>
+                <option value='"WildWords", "CC Wild Words", "Comic Sans MS", sans-serif'>WildWords</option>
+                <option value='"Bad Comic", cursive, sans-serif'>BadComic</option>
+              </select>
+            </div>
+            
+            <div className="flex flex-col w-full sm:w-auto">
+              <label className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wider" title="Set to 0 for auto-scaling">Default Size (pt)</label>
+              <input 
+                type="number"
+                min="0"
+                max="100"
+                step="0.5"
+                value={defaultFontSize > 0 ? defaultFontSize : ''}
+                onChange={(e) => setDefaultFontSize(parseFloat(e.target.value) || 0)}
+                className="bg-gray-50 border border-gray-200 text-gray-900 text-base sm:text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-3 sm:p-2.5 min-h-[44px] transition-all hover:border-indigo-300"
+                placeholder="Auto (0)"
+              />
+            </div>
+          </div>
+          
+          <div className="flex flex-col w-full">
+            <label className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wider">Custom Instructions (Optional)</label>
+            <textarea
+              value={customPrompt}
+              onChange={(e) => setCustomPrompt(e.target.value)}
+              placeholder="E.g., Keep honorifics like -san, translate sound effects, use informal tone..."
+              className="bg-gray-50 border border-gray-200 text-gray-900 text-base sm:text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-3 sm:p-2.5 min-h-[88px] resize-y transition-all hover:border-indigo-300"
+            />
+          </div>
+        </motion.div>
+
+        {items.length === 0 ? (
+          <div className="space-y-6">
+            <div className="text-center space-y-2">
+              <h2 className="text-2xl font-semibold tracking-tight">Translate Manga Instantly</h2>
+              <p className="text-gray-500">Upload images or PDFs, or take a photo to get started.</p>
+            </div>
+            <ImageUploader onImagesSelected={handleImagesSelected} />
+          </div>
+        ) : (
+          <div className="space-y-6 flex flex-col items-center">
+            {/* Pagination / Navigation */}
+            <div className="w-full flex flex-wrap items-center justify-between bg-white p-3 rounded-2xl shadow-sm border border-gray-200 gap-3">
+              <div className="flex items-center justify-between w-full sm:w-auto order-1 sm:order-none">
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
+                  disabled={currentIndex === 0}
+                  className="p-3 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                >
+                  <ChevronLeft className="w-6 h-6 text-gray-700" />
+                </motion.button>
+                
+                <div className="flex flex-col items-center sm:hidden px-4">
+                  <span className="text-sm font-medium text-gray-900">
+                    Page {currentIndex + 1} of {items.length}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {items.filter(i => i.status === 'done').length} translated
+                  </span>
+                </div>
+
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setCurrentIndex(prev => Math.min(items.length - 1, prev + 1))}
+                  disabled={currentIndex === items.length - 1}
+                  className="p-3 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+                >
+                  <ChevronRight className="w-6 h-6 text-gray-700" />
+                </motion.button>
+              </div>
+              
+              <div className="hidden sm:flex flex-col items-center order-2 sm:order-none">
+                <span className="text-sm font-medium text-gray-900">
+                  Page {currentIndex + 1} of {items.length}
+                </span>
+                <span className="text-xs text-gray-500">
+                  {items.filter(i => i.status === 'done').length} translated
+                </span>
+              </div>
+
+              <div className="flex items-center justify-center space-x-2 w-full sm:w-auto order-3 sm:order-none">
+                {items.some(item => item.status === 'pending' || item.status === 'error') && (
+                  <div className="flex flex-wrap justify-center items-center gap-2 w-full sm:w-auto">
+                    <select
+                      value={batchMode}
+                      onChange={(e) => setBatchMode(e.target.value as 'sequential' | 'parallel')}
+                      className="text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 py-2 pl-3 pr-8 min-h-[44px] flex-1 sm:flex-none"
+                      title="Batch Mode"
+                      disabled={isBatchTranslating}
+                    >
+                      <option value="sequential">Sequential</option>
+                      <option value="parallel">Parallel</option>
+                    </select>
+                    {batchMode === 'parallel' && (
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={batchSize}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '') {
+                            setBatchSize('');
+                          } else {
+                            const num = parseInt(val);
+                            if (!isNaN(num)) {
+                              setBatchSize(Math.min(10, num));
+                            }
+                          }
+                        }}
+                        onBlur={() => {
+                          if (batchSize === '' || Number(batchSize) < 1) {
+                            setBatchSize(1);
+                          }
+                        }}
+                        className="w-16 text-sm border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 py-2 px-2 min-h-[44px]"
+                        title="Batch Size (1-10)"
+                        disabled={isBatchTranslating}
+                      />
+                    )}
+                    {isBatchTranslating ? (
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={handleStopBatch}
+                        className="flex items-center justify-center space-x-1 px-4 py-2 bg-red-100 text-red-700 hover:bg-red-200 rounded-full text-sm font-medium transition-colors min-h-[44px] flex-1 sm:flex-none sm:w-auto"
+                        title="Stop batch translation"
+                      >
+                        <Square className="w-4 h-4 fill-current" />
+                        <span>Stop</span>
+                      </motion.button>
+                    ) : (
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={handleTranslateAll}
+                        className="flex items-center justify-center space-x-1 px-4 py-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded-full text-sm font-medium transition-colors min-h-[44px] flex-1 sm:flex-none sm:w-auto"
+                        title="Translate all pending pages"
+                      >
+                        <Play className="w-4 h-4" />
+                        <span>Translate All</span>
+                      </motion.button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+
+            {/* Current Item Display */}
+            {currentItem && (
+              <div className="w-full space-y-6 flex flex-col items-center">
+                <div className="w-full flex justify-end">
+                  <motion.button
+                    whileHover={{ scale: 1.05, color: '#ef4444' }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => handleRemoveImage(currentIndex)}
+                    className="flex items-center space-x-1 text-sm sm:text-base text-red-500 hover:text-red-700 transition-colors p-2 min-h-[44px]"
+                  >
+                    <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <span>Remove Page</span>
+                  </motion.button>
+                </div>
+
+                {currentItem.error && (
+                  <div className="w-full p-4 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-3">
+                    <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                    <p className="text-sm text-red-700">{currentItem.error}</p>
+                  </div>
+                )}
+
+                {currentItem.status === 'error' && (
+                  <div className="w-full max-w-2xl mx-auto">
+                    <div className="relative rounded-xl overflow-hidden shadow-md border border-gray-200">
+                      <img src={currentItem.imageUrl} alt="Selected manga page" className="w-full h-auto block opacity-50" />
+                    </div>
+                    <div className="mt-6 flex justify-center">
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => handleRetry(currentIndex)}
+                        className="flex items-center justify-center space-x-2 w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full font-medium shadow-lg shadow-indigo-200 transition-all"
+                      >
+                        <RefreshCw className="w-5 h-5" />
+                        <span>Retry Translation</span>
+                      </motion.button>
+                    </div>
+                  </div>
+                )}
+
+                {(currentItem.status === 'pending' || currentItem.status === 'translating') && (
+                  <div className="w-full max-w-2xl mx-auto flex flex-col items-center justify-center py-20 space-y-4">
+                    {currentItem.status === 'translating' ? (
+                      <>
+                        <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
+                        <p className="text-gray-500 font-medium animate-pulse">
+                          Analyzing and translating...
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
+                          <Clock className="w-5 h-5 text-gray-400" />
+                        </div>
+                        <p className="text-gray-500 font-medium">
+                          Ready to translate. Click "Translate All" to begin.
+                        </p>
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => translateItem(currentIndex)}
+                          className="mt-4 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full font-medium transition-colors min-h-[44px] text-base shadow-md"
+                        >
+                          Translate This Page
+                        </motion.button>
+                      </>
+                    )}
+                    <div className="relative rounded-xl overflow-hidden shadow-md border border-gray-200 mt-4 opacity-50 w-64">
+                      <img src={currentItem.imageUrl} alt="Selected manga page" className="w-full h-auto block" />
+                    </div>
+                  </div>
+                )}
+
+                {currentItem.status === 'done' && currentItem.blocks && (
+                  <div className="w-full space-y-6">
+                    <div className="flex justify-end">
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => {
+                          setIsMultiSelectMode(!isMultiSelectMode);
+                          if (isMultiSelectMode) setSelectedBlocks([]);
+                        }}
+                        className={`flex items-center space-x-2 px-4 py-2 rounded-full font-medium transition-colors text-sm shadow-sm ${
+                          isMultiSelectMode 
+                            ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' 
+                            : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <CheckSquare className="w-4 h-4" />
+                        <span>{isMultiSelectMode ? 'Done Selecting' : 'Select Multiple'}</span>
+                      </motion.button>
+                    </div>
+                    <TranslationOverlay 
+                      imageUrl={currentItem.imageUrl} 
+                      blocks={currentItem.blocks} 
+                      onDeleteBlock={handleDeleteBlock} 
+                      onEditBlock={handleEditBlock} 
+                      fontFamily={fontFamily} 
+                      isMultiSelectMode={isMultiSelectMode}
+                      selectedBlockIndices={selectedBlocks.filter(b => b.pageIndex === currentIndex).map(b => b.blockIndex)}
+                      onToggleBlockSelection={(blockIndex) => handleToggleBlockSelection(currentIndex, blockIndex)}
+                    />
+                    
+                    {currentItem.usage && (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="flex items-center justify-center text-sm text-gray-500 space-x-6 bg-white py-3 px-6 rounded-full shadow-sm border border-gray-100 w-max mx-auto"
+                      >
+                        <div className="flex items-center space-x-2" title="Tokens used">
+                          <Database className="w-4 h-4 text-indigo-400" />
+                          <span className="font-medium">{currentItem.usage.totalTokens.toLocaleString()} tokens</span>
+                        </div>
+                        {currentItem.usage.estimatedCost !== undefined && (
+                          <div className="flex items-center space-x-2" title="Estimated cost">
+                            <Info className="w-4 h-4 text-emerald-400" />
+                            <span className="font-medium">~${currentItem.usage.estimatedCost.toFixed(4)}</span>
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+                    
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={handleDownload}
+                        className="flex items-center justify-center space-x-2 w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full font-medium shadow-lg shadow-indigo-200 transition-all active:scale-95"
+                      >
+                        <Download className="w-5 h-5" />
+                        <span>Download PDF</span>
+                      </motion.button>
+                      
+                      {items.filter(item => item.status === 'done').length > 1 && (
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={handleDownloadAll}
+                          disabled={isDownloadingAll}
+                          className="flex items-center justify-center space-x-2 w-full sm:w-auto px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full font-medium shadow-lg shadow-emerald-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+                        >
+                          {isDownloadingAll ? (
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                          ) : (
+                            <Archive className="w-5 h-5" />
+                          )}
+                          <span>Download All (PDF)</span>
+                        </motion.button>
+                      )}
+                    </div>
+                    
+                    <div className="my-8">
+                      <AdSense key={`ad-mid-${currentIndex}-${items.length}-${currentItem?.status || 'none'}`} adSlot="8493028192" adFormat="fluid" className="w-full" />
+                    </div>
+
+                    {currentItem.blocks.length > 0 ? (
+                      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                          <h3 className="font-medium text-gray-900">Extracted Text</h3>
+                        </div>
+                        <ul className="divide-y divide-gray-100">
+                          {currentItem.blocks.map((block, idx) => (
+                            <li key={idx} className="p-4 hover:bg-gray-50 transition-colors">
+                              <div className="space-y-1">
+                                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Original</p>
+                                <p className="text-sm text-gray-700">{block.originalText}</p>
+                              </div>
+                              <div className="mt-3 space-y-1">
+                                <p className="text-xs font-medium text-indigo-500 uppercase tracking-wider">Translation</p>
+                                <p className="text-base text-gray-900 font-medium">{block.translatedText}</p>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : (
+                      <div className="text-center py-10 bg-white rounded-2xl border border-gray-200">
+                        <p className="text-gray-500">No text bubbles found on this page.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Add more files button */}
+            <div className="w-full pt-6 border-t border-gray-200">
+              <ImageUploader onImagesSelected={handleImagesSelected} />
+            </div>
+          </div>
+        )}
+        
+        <AdSense key={`ad-bottom-${currentIndex}-${items.length}-${currentItem?.status || 'none'}`} adSlot="5647382910" adFormat="auto" className="mt-8" />
+      </main>
+
+      {/* Multi-select Floating Action Bar */}
+      <AnimatePresence>
+        {selectedBlocks.length > 0 && (
+          <motion.div 
+            initial={{ y: 100, x: '-50%', opacity: 0 }}
+            animate={{ y: 0, x: '-50%', opacity: 1 }}
+            exit={{ y: 100, x: '-50%', opacity: 0 }}
+            className="fixed bottom-6 left-1/2 bg-white shadow-2xl rounded-full px-4 sm:px-6 py-3 flex items-center space-x-2 sm:space-x-4 z-50 border border-gray-200"
+          >
+            <div className="flex items-center space-x-2 bg-indigo-50 px-3 py-1.5 rounded-full">
+              <Layers className="w-4 h-4 text-indigo-600" />
+              <span className="font-medium text-indigo-700 text-sm">{selectedBlocks.length} selected</span>
+            </div>
+            <div className="h-6 w-px bg-gray-200 hidden sm:block"></div>
+            <button 
+              onClick={() => setIsMultiEditModalOpen(true)} 
+              className="flex items-center space-x-1 text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium"
+            >
+              <Edit3 className="w-4 h-4" />
+              <span className="hidden sm:inline">Edit</span>
+            </button>
+            <button 
+              onClick={() => setShowConfirmMultiDelete(true)} 
+              className="flex items-center space-x-1 text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Delete</span>
+            </button>
+            <div className="h-6 w-px bg-gray-200 hidden sm:block"></div>
+            <button 
+              onClick={() => setSelectedBlocks([])} 
+              className="text-gray-500 hover:bg-gray-100 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium"
+            >
+              Clear
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Multi-Edit Modal */}
+      <AnimatePresence>
+        {isMultiEditModalOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 flex flex-col space-y-4"
+            >
+              <h3 className="text-lg font-semibold text-gray-900">Edit {selectedBlocks.length} Blocks</h3>
+              <div className="space-y-4">
+                <div className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                  <input 
+                    type="checkbox" 
+                    id="applyText"
+                    checked={multiEditApplyText} 
+                    onChange={e => setMultiEditApplyText(e.target.checked)} 
+                    className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" 
+                  />
+                  <div className="flex-1">
+                    <label htmlFor="applyText" className="block text-sm font-medium text-gray-700 mb-1 cursor-pointer">Apply New Text</label>
+                    <textarea
+                      disabled={!multiEditApplyText}
+                      value={multiEditText}
+                      onChange={(e) => setMultiEditText(e.target.value)}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 min-h-[100px] disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-sm"
+                      placeholder="Enter text to apply to all selected blocks..."
+                    />
+                  </div>
+                </div>
+                <div className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                  <input 
+                    type="checkbox" 
+                    id="applyFontSize"
+                    checked={multiEditApplyFontSize} 
+                    onChange={e => setMultiEditApplyFontSize(e.target.checked)} 
+                    className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" 
+                  />
+                  <div className="flex-1">
+                    <label htmlFor="applyFontSize" className="block text-sm font-medium text-gray-700 mb-2 cursor-pointer">Apply Font Size</label>
+                    <div className="flex items-center space-x-4">
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="fontSizeMode"
+                          disabled={!multiEditApplyFontSize}
+                          checked={multiEditFontSize === 0}
+                          onChange={() => setMultiEditFontSize(0)}
+                          className="text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                        />
+                        <span className={`text-sm ${!multiEditApplyFontSize ? 'text-gray-400' : 'text-gray-700'}`}>Auto-size</span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input 
+                          type="radio" 
+                          name="fontSizeMode"
+                          disabled={!multiEditApplyFontSize}
+                          checked={multiEditFontSize > 0}
+                          onChange={() => setMultiEditFontSize(10)}
+                          className="text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                        />
+                        <span className={`text-sm ${!multiEditApplyFontSize ? 'text-gray-400' : 'text-gray-700'}`}>Custom size:</span>
+                      </label>
+                      <input
+                        disabled={!multiEditApplyFontSize || multiEditFontSize === 0}
+                        type="number"
+                        min="1"
+                        max="100"
+                        step="0.5"
+                        value={multiEditFontSize > 0 ? multiEditFontSize : ''}
+                        onChange={(e) => setMultiEditFontSize(parseFloat(e.target.value) || 0)}
+                        className="w-20 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-sm"
+                        placeholder="px/pt"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3 pt-4 border-t border-gray-100">
+                <button
+                  onClick={() => setIsMultiEditModalOpen(false)}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleApplyMultiEdit}
+                  disabled={!multiEditApplyText && !multiEditApplyFontSize}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Apply to All
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Multi-Delete Confirm Modal */}
+      <AnimatePresence>
+        {showConfirmMultiDelete && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 flex flex-col space-y-4"
+            >
+              <h3 className="text-lg font-semibold text-gray-900">Delete Blocks</h3>
+              <p className="text-gray-600">Are you sure you want to delete {selectedBlocks.length} selected blocks? This action cannot be undone.</p>
+              <div className="flex justify-end space-x-3 pt-2">
+                <button
+                  onClick={() => setShowConfirmMultiDelete(false)}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors min-h-[44px]"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setShowConfirmMultiDelete(false);
+                    handleMultiDelete();
+                  }}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors min-h-[44px]"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
